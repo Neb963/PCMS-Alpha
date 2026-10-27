@@ -31,13 +31,14 @@ export function publishNativeReadiness(status,{idle=false}={}){
 
 export const READINESS_FOLLOWUP_ALARM='pcms-protected-readiness-followup';
 export const READINESS_RECEIPT='pcmsProtectedReadinessReceipt';
+export const BRIDGE_RECOVERY_RECEIPT='pcmsProtectedBridgeRecovery';
 const retryable=code=>/^(MULLVAD_|DONOR_|PROTECTED_|GUARD_|LEASE_|SESSION_CONTEXT_CHANGED$|ROUTE_OBSERVATION_|ROUTE_CHECK_FAILED$|ROUTE_SEARCH_PENDING$|NO_ROUTE_CANDIDATES$|ENROLLMENT_|ACCOUNT_BUSY$|INVENTORY_UNAVAILABLE$)/.test(code||'');
 const SAFE_STATE=new Set(['IDLE','WAITING_FOR_DONOR','CHECKING_ACCOUNTS','ACCOUNT_HELD','OBSERVED','FAILED']);
 // A small fixed readiness queue, not another router or workflow executor.
 // Only operator-bound accounts may enter. The durable queue is a retry hint;
 // enrollment rereads canonical state and owns all potentially active effects.
 export function createProtectedReadinessCoordinator(api,{list,connection,check,inUse=async()=>false,activePersonas=null,
- hold=()=>{},held=async()=>false,clock=Date.now,maxPerTurn=4,observationMs=40000,subscribe=subscribeProtectedReadiness}={}){
+ hold=()=>{},held=async()=>false,repairBridge=null,clock=Date.now,maxPerTurn=4,observationMs=40000,subscribe=subscribeProtectedReadiness}={}){
  if(!Number.isSafeInteger(observationMs)||observationMs<10||observationMs>40000)throw Error('INVALID_OBSERVATION_BUDGET');
  let flight=null,registered=false,hydrate=null,queue=new Map(),all=false,periodic=false,changed=false;
  const observations=new Map();
@@ -78,6 +79,44 @@ export function createProtectedReadinessCoordinator(api,{list,connection,check,i
    failureCode,nextSafeRetry:next,scope,causalRoot:failureCode?.startsWith('MULLVAD_')?'personamonkey_connection':'protected_account',
    idleStopped,hostAttempts,pending:[...queue.values()].slice(0,1000)}});
  }
+ // A donor-owned tunnel restart is a shared native mutation, not a route
+ // probe or a license to rotate accounts. Persist possible dispatch first.
+ // Never repeat it on a lost ACK; only a fresh healthy status ends the episode.
+ const bridgeFailure=host=>host?.installed===true&&host.compatible===true&&host.ready===false&&
+   ['MULLVAD_TUNNEL_UNAVAILABLE','MULLVAD_PROXY_UNREACHABLE',
+    'MULLVAD_TUNNEL_ROUTE_UNAVAILABLE'].includes(host.code);
+ async function bridgeRecovery(host){
+  if(typeof repairBridge!=='function'||idleStopped||!bridgeFailure(host))return null;
+  const prior=(await api.storage.local.get(BRIDGE_RECOVERY_RECEIPT))?.[BRIDGE_RECOVERY_RECEIPT];
+  if(prior?.phase==='DISPATCH_POSSIBLE'||prior?.phase==='HELD')
+   return {ok:false,code:'MULLVAD_BRIDGE_RECOVERY_UNCERTAIN'};
+  // Two observations: a one-off native status or an intentionally resting
+  // connection is not enough reason to interrupt the shared tunnel.
+  const fresh=await observe('bridge-connection',connection);
+  if(!bridgeFailure(fresh))return null;
+  const intent={schema:1,phase:'DISPATCH_POSSIBLE',reason:fresh.code,at:clock()};
+  await api.storage.local.set({[BRIDGE_RECOVERY_RECEIPT]:intent});
+  let reply;
+  try{reply=await observe('bridge-restart',repairBridge);}
+  catch{reply={ok:false,code:'MULLVAD_BRIDGE_RECOVERY_UNCERTAIN'};}
+  if(reply?.noDispatch===true){
+   await api.storage.local.set({[BRIDGE_RECOVERY_RECEIPT]:{...intent,phase:'NO_DISPATCH',code:reply.code||'DONOR_REPAIR_SKIPPED'}});
+   return null;
+  }
+  // A native ACK is not connection or egress evidence. An ambiguous result
+  // remains fenced even if native effects settle after our observation budget.
+  if(reply?.ok!==true){
+   await api.storage.local.set({[BRIDGE_RECOVERY_RECEIPT]:{...intent,phase:'HELD',code:'MULLVAD_BRIDGE_RECOVERY_UNCERTAIN'}});
+   return {ok:false,code:'MULLVAD_BRIDGE_RECOVERY_UNCERTAIN'};
+  }
+  const verified=await observe('bridge-after',connection);
+  if(verified?.ready===true&&verified.tunnelUp===true&&verified.proxyReachable===true){
+   await api.storage.local.set({[BRIDGE_RECOVERY_RECEIPT]:{...intent,phase:'OBSERVED_RECOVERED',at:clock()}});
+   return {ok:true,recovered:true};
+  }
+  await api.storage.local.set({[BRIDGE_RECOVERY_RECEIPT]:{...intent,phase:'HELD',code:'MULLVAD_BRIDGE_RECOVERY_UNCONFIRMED'}});
+  return {ok:false,code:'MULLVAD_BRIDGE_RECOVERY_UNCONFIRMED'};
+ }
  async function perform(){
   await (hydrate||=load().catch(error=>{hydrate=null;throw error}));
   if(await held())return {ok:false,code:'RESTORE_HOLD'};
@@ -111,6 +150,21 @@ export function createProtectedReadinessCoordinator(api,{list,connection,check,i
    await receipt('WAITING_FOR_DONOR',code);await schedule();return {ok:false,code};
   }
   hostAttempts=0;
+  if(host.ready===true&&host.tunnelUp===true&&host.proxyReachable===true){
+   const prior=(await api.storage.local.get(BRIDGE_RECOVERY_RECEIPT))?.[BRIDGE_RECOVERY_RECEIPT];
+   if(prior?.phase&&prior.phase!=='HEALTHY')
+    await api.storage.local.set({[BRIDGE_RECOVERY_RECEIPT]:{schema:1,phase:'HEALTHY',at:clock()}});
+  }
+  if(queue.size&&[...queue.values()].some(row=>row.nextRetry<=clock())){
+   const repaired=await bridgeRecovery(host);
+   if(repaired?.ok===false){
+    for(const row of queue.values()){
+     row.failureCode=repaired.code;row.nextRetry=clock()+60000;
+    }
+    await receipt('WAITING_FOR_DONOR',repaired.code);await schedule();
+    return {ok:false,code:repaired.code};
+   }
+  }
   const selected=[...queue.values()].filter(r=>r.nextRetry<=clock())
    .sort((a,b)=>a.lastAttempt-b.lastAttempt||a.accountId.localeCompare(b.accountId)).slice(0,maxPerTurn);
   // Persist fair advancement before waiting on any potentially slow account.
