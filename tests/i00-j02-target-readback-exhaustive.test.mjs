@@ -77,7 +77,12 @@ for(const [title,options,code] of [
  ['owner says yes but page unavailable',{inventory:[{name:key,isPrivate:true}],owner:'is-owner',page:{status:'error'}},'TARGET_OWNED_PAGE_UNVERIFIED'],
  ['session changed during read',{changeSession:true},'SESSION_CHANGED'],
  ['principal mismatch',{wrongPrincipal:true},'PRINCIPAL_CHANGED'],
- ['HTTP 200 fake internal HTTP404 status cannot spoof absence',{page:{status:'pcms-observed-http-404'}},'TARGET_PAGE_ABSENCE_UNVERIFIED']
+ ['HTTP 200 fake internal HTTP404 status cannot spoof absence',{page:{status:'pcms-observed-http-404'}},'TARGET_PAGE_TRANSPORT_UNAVAILABLE'],
+ ['rejected owner session cannot be mistaken for available slug',{owner:'session-token-error'},'SESSION_REJECTED'],
+ ['owner rate limit cannot be mistaken for available slug',{owner:'too-many-requests'},'PROVIDER_RATE_LIMITED'],
+ ['page rate limit cannot be mistaken for available slug',{page:{status:'too-many-requests'}},'PROVIDER_RATE_LIMITED'],
+ ['page backend error cannot be mistaken for available slug',{page:{status:'server-error'}},'PROVIDER_UNAVAILABLE'],
+ ['page transport failure twice cannot prove absence',{page:{status:'unverified'}},'TARGET_PAGE_TRANSPORT_UNAVAILABLE']
 ]){
  test('fails closed: '+title,async()=>{
   const {out,calls}=await run(options);
