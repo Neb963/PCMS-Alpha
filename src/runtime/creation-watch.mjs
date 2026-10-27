@@ -92,7 +92,8 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
               'GIT_INIT_PENDING','GIT_PREPARED','GIT_DISPATCH_POSSIBLE',
               'GIT_OBSERVING','GIT_UNCERTAIN'].includes(item.state)&&
               !item.conflict&&!(item.lastAttempt?.revision===item.revision&&
-                item.lastAttempt.ok===false&&clock()-item.lastAttempt.at<5*60*1000)){
+                item.lastAttempt.ok===false&&item.lastAttempt.code!=='INITIAL_INVENTORY_REFRESHED'&&
+                clock()-item.lastAttempt.at<5*60*1000)){
             const key=scopeOf(item);
             if(!buckets.has(key)&&buckets.size<maxPerWake)buckets.set(key,[]);
             const bucket=buckets.get(key);
@@ -127,7 +128,13 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
           progressed:r=>r?.ok===true&&r?.record?.revision>item.revision});
          if(result?.ok&&result.record?.revision>item.revision){progressed++;
           if(result.record.state!=='ASSOCIATED_NOT_READY')continuing++;
-         }else held++;
+         }else{
+          held++;
+          // One independently committed inventory census is forward motion,
+          // not a reason to freeze the other missing-account scans for ten
+          // minutes. The 60s follow-up still obeys the shared wake budget.
+          if(result?.code==='INITIAL_INVENTORY_REFRESHED')continuing++;
+         }
          if(['SCOPE_OBSERVATION_PENDING','SCOPE_ACTUAL_WORK_PENDING',
              'SCOPE_CAPACITY_HELD'].includes(result?.code))break;
         }

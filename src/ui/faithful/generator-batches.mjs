@@ -26,7 +26,7 @@ export async function checkCreationItem(item,call){
  if(record.state==='ASSOCIATED_NOT_READY')return {ok:true,code:'CREATION_ALREADY_ASSOCIATED'};
  return call('RUN_CREATE_STEP',{intentId:item.intentId,expectedRevision:record.revision},100000);
 }
-export function createGeneratorBatches({root,el,b,request,accounts,reload,manageAccount,notify}){
+export function createGeneratorBatches({root,el,b,request,accounts,reload,manageAccount,openAccounts=()=>{},notify}){
  const call=(type,params={},timeout=30000)=>request(port,type,params,timeout);
  function dialog(title){
   const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('section','drawer');
@@ -46,7 +46,13 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
   if(!code)return '';
   if(code==='NO_MANAGED_ACCOUNTS')return 'Add an account in Accounts. Submitted requests can wait safely.';
   if(code.includes('QUARANTINED'))return 'Historical operation retained for manual investigation.';
-  if(/INVENTORY|(?:^|_)COUNT(?:_|$)/.test(code))return 'Synchronize account inventory; queued work is preserved.';
+  if(code==='INITIAL_INVENTORY_UNKNOWN'||code==='INITIAL_INVENTORY_REFRESHED')
+   return 'Checking complete owned-generator counts for managed accounts before allocation. Requests remain queued.';
+  if(code==='INITIAL_INVENTORY_ACCOUNT_UNVERIFIED')
+   return 'Account login or original identity is not verified. Open Accounts and finish verification.';
+  if(code==='INITIAL_INVENTORY_UNVERIFIED')
+   return 'The fresh census could not verify every owned item. Inspect the affected account inventory.';
+  if(/INVENTORY|(?:^|_)COUNT(?:_|$)/.test(code))return 'Protected inventory readback is needed before generator creation.';
   if(/ROUTE|GUARD|DONOR/.test(code))return 'Check the account’s protected route.';
   if(/ACCOUNT|LOGIN|SESSION/.test(code))return 'Complete account login or reactivation.';
   if(/GIT|ARCHIVE|SOURCE_CHECKPOINT/.test(code))return 'Check GitHub connection and original-source backup.';
@@ -74,11 +80,16 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
     list.replaceChildren();pager.replaceChildren();
     for(const item of out.items){const row=el('section','batch-item');row.dataset.batchIndex=item.index;
      row.append(el('strong','',item.slug),el('p','setting-note',accountName(item.accountId,rows)+' · '+(labels[item.state]||'Waiting for a safe checkpoint')+
-      (item.coalesced?' · shared existing job':'')),el('p','setting-note',explain(item.hold)));
+      (item.coalesced?' · shared existing job':'')),el('p','setting-note',
+       explain(item.hold)+(item.hold?' · '+item.hold:'')));
      if(item.intakeHeld){row.append(b('Retry this input',()=>void action('RETRY_CREATE_BATCH_HOLD',{batchId,index:item.index})))}
-     else if(item.intentId&&item.state!=='ASSOCIATED_NOT_READY')row.append(b('Retry check',()=>void action('RUN_CREATE_STEP',{
+     else if(item.intentId&&item.state!=='ASSOCIATED_NOT_READY')row.append(b(
+       item.state==='WAITING_CAPABILITY'?'Recover prerequisites':
+       /DISPATCH_POSSIBLE|UNCERTAIN|OBSERVING/.test(item.state)?'Verify saved result':'Continue request',
+       ()=>void action('RUN_CREATE_STEP',{
       intentId:item.intentId,slug:item.slug,expectedRevision:item.revision})));
      if(item.accountId&&item.state!=='CANCELLED')row.append(b('Manage account',()=>{const a=rows.find(a=>a.accountId===item.accountId);if(a){d.close();manageAccount(a)}}));
+     else if(item.state==='WAITING_CAPABILITY')row.append(b('Inspect Accounts',()=>{d.close();openAccounts()}));
      list.append(row);
     }
     if(!out.items.length)list.append(el('p','setting-note','No matching items.'));
@@ -173,7 +184,9 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
     const inventoryBlockers=out.items.some(i=>i.code==='INITIAL_INVENTORY_UNKNOWN')?
       (out.accounts||[]).filter(a=>a.state!=='ARCHIVED'&&!a.initialKnown&&(!selectedAccount||a.accountId===selectedAccount)).map(a=>a.accountId):[];
     frozen=Object.freeze({slugs:[...slugs],accountId:selectedAccount,items:out.items,inventoryBlockers});offset=0;persisted=null;
-    draw();status.textContent='Preview frozen for these inputs. Counts are checked again before creation; held items do not stop the others.';
+    draw();status.textContent=inventoryBlockers.length?
+      'Initial owned counts are missing. Submitting saves requests; PCMS will attempt protected inventory recovery before allocation. No remote creation is assumed.':
+      'Preview saved. Counts are rechecked before creation; held items do not stop unrelated work.';
     submit.hidden=false;review.hidden=false;review.textContent='Update preview';review.className='btn';submit.focus();
    }catch{status.textContent='Preview unavailable. Your input is preserved. Retry after checking Accounts.'}
    finally{busy=false;review.disabled=false;input.disabled=false;choice.disabled=false}

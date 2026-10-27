@@ -99,13 +99,18 @@ const out=await createOperatorRecords().put('ui:diagnostic-report:'+run.runId,{s
         reviewed=g.oracle(s,'return await window.__j06attention.inspect()');assert reviewed['notice']['reviewed'] and reviewed['notice']['state']=='ACTIVE' and reviewed['acknowledgments']==2,reviewed
         evidence['attention-fault-recovery']=reviewed
         capture(s,'attention-reviewed-still-active',evidence)
-        g.click_text(s,'Open affected item')
-        wait(s,"!!sh.querySelector('#pcms-backup-inspect-file')",'J06_TYPED_INCIDENT_TARGET_NAVIGATION')
+        # The saved SOURCE_HELD incident intentionally carries an unrelated
+        # typed Settings/Backups target. It is not an affected generator.
+        # Opening it must inspect its true cause without false navigation.
+        g.click_text(s,'Inspect cause')
+        wait(s,"sh.querySelector('[role=dialog]')?.getAttribute('aria-label')==='Incident details'&&location.hash==='#work-queue'",'J06_MISMATCHED_TARGET_OPENS_REAL_CAUSE_NOT_SETTINGS')
+        g.click_text(s,'Close','[role=dialog]')
         g.click(s,'.top-search');g.fill(s,'[role=dialog] input','incident_j06_source')
         wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('incident_j06_source')",'J06_GLOBAL_SEARCH_INCLUDES_INCIDENTS')
         g.click_text(s,'Open','[role=dialog]')
-        wait(s,"!sh.querySelector('[role=dialog]')&&!!sh.querySelector('#pcms-backup-inspect-file')",'J06_SEARCH_TARGET_RECOVERY')
-        g.click(s,'[data-settings=backups]')
+        wait(s,"sh.querySelector('[role=dialog]')?.getAttribute('aria-label')==='Incident details'&&location.hash==='#work-queue'",'J06_SEARCH_OPENS_CAUSAL_INSPECTION_WITHOUT_MISROUTING')
+        g.click_text(s,'Close','[role=dialog]')
+        g.click(s,'[data-nav=settings]');g.click(s,'[data-settings=backups]')
         wait(s,"!!sh.querySelector('#pcms-backup-inspect-file')",'J06_PRIMARY_BACKUP_WORKSPACE')
         g.click_text(s,'Download complete backup')
         wait(s,"sh.querySelector('#page')?.textContent.includes('Backup saved in your Firefox downloads')",'J06_REAL_MANUAL_BACKUP',90)

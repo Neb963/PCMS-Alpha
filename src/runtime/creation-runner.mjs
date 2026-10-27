@@ -1,5 +1,5 @@
 import {createInitialImportGuard} from './creation-import-authority.mjs';
-import {ensureCreationInventory} from './creation-inventory.mjs';
+import {ensureCreationInventory,recoverMissingCreationCensus} from './creation-inventory.mjs';
 import {inventoryBoundary} from './inventory-boundary.mjs';
 // S04 fixed, one-step guarded creation runner. No generic job engine.
 // Canonical operator intent scopes private creation independently of Git;
@@ -42,8 +42,20 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
       if(['WAITING_CAPABILITY','OWNER_MISSING_VERIFIED','PRIVATE_EMPTY_CONFIRMED','CREATE_PREPARED','RENAME_PREPARED'].includes(item.state)){
         const scope=await importGuard(await (dbPromise||=open()),item,{verifyGit:!['WAITING_CAPABILITY','CREATE_PREPARED','RENAME_PREPARED'].includes(item.state)});if(!scope.ok)return scope;
       }
-      if(item.state==='WAITING_CAPABILITY')
-        return await s.allocateCreate(item.intentId,item.revision);
+      if(item.state==='WAITING_CAPABILITY'){
+        const allocation=await s.allocateCreate(item.intentId,item.revision);
+        if(allocation.ok||allocation.code!=='INITIAL_INVENTORY_UNKNOWN')return allocation;
+        // The intake journal is already durable. Census recovery makes no
+        // generator mutations, and never invents a zero count. One protected
+        // account at a time limits load for mixed fleets and lost readers.
+        const db=await (dbPromise||=open());
+        const recovery=await recoverMissingCreationCensus({
+          db,accountId:item.accountId||null,syncInventory});
+        if(!recovery.ok)return recovery;
+        const retried=await s.allocateCreate(item.intentId,item.revision);
+        if(retried.ok||retried.code!=='INITIAL_INVENTORY_UNKNOWN')return retried;
+        return fail('INITIAL_INVENTORY_REFRESHED'); // Observed progress; more accounts need census.
+      }
       if(item.state==='OWNER_READBACK_PENDING'){
         const moved=await s.requeueArchivedUnattempted(item.intentId,item.revision);
         if(moved.ok)return moved;
