@@ -80,7 +80,15 @@ def wait_state(session, account_id, state, seconds=35):
 
 
 def manage(session, account_id):
-    click(session,'[data-account-id="'+account_id+'"] [data-account-manage]')
+    # A cold Firefox restart can complete the primary mount before the
+    # asynchronous canonical account page has painted its rows. A missing
+    # row is still a failure; wait for the *exact same account* to appear,
+    # rather than clicking during a transient loading skeleton or selecting
+    # another account. wait() prints the current page and dialog on failure.
+    target='[data-account-id="'+account_id+'"] [data-account-manage]'
+    wait(session,"!!sh?.querySelector("+json.dumps(target)+")",
+         "J01_EXACT_ACCOUNT_ROW_AFTER_MOUNT",55)
+    click(session,target)
     wait(session,"!!sh?.querySelector('.account-dialog')","J01_DIALOG")
     wait(session,"sh?.querySelector('.account-dialog .account-summary')?.textContent.includes('Checking…')===false","J01_INSPECTOR")
 
