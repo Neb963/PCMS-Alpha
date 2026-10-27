@@ -44,21 +44,25 @@ def wait_upgraded_runtime(session, expected_version, timeout_seconds=12):
     raise AssertionError(('A08_UPGRADED_RUNTIME_NOT_READY',last))
 
 
-def main():
+def main(previous_archive=None):
     target=pathlib.Path(sys.argv[1]).resolve()
     firefox=pathlib.Path(os.environ['FIREFOX_BINARY'])
     driver=pathlib.Path(os.environ['GECKODRIVER_BINARY'])
     root=pathlib.Path(__file__).resolve().parent.parent
     with tempfile.TemporaryDirectory(prefix='pcms-a08-upgrade-') as tmp:
         folder=pathlib.Path(tmp)
-        old=folder/'persona-donor.xpi'
-        subprocess.run([sys.executable,str(root/'scripts/zip-xpi.py'),
-            str(root/'donor/personamonkey/extension'),str(old)],check=True,
-            stdout=subprocess.DEVNULL)
+        old=folder/('pcms-previous.xpi' if previous_archive else 'persona-donor.xpi')
+        expected_old='1.2.16' if previous_archive else '1.2.0'
+        if previous_archive:
+            old.write_bytes(pathlib.Path(previous_archive).read_bytes())
+        else:
+            subprocess.run([sys.executable,str(root/'scripts/zip-xpi.py'),
+                str(root/'donor/personamonkey/extension'),str(old)],check=True,
+                stdout=subprocess.DEVNULL)
         import zipfile
         with zipfile.ZipFile(old) as z:
             m=json.loads(z.read('manifest.json'))
-            assert m['version']=='1.2.0',m['version']
+            assert m['version']==expected_old,m['version']
             assert m['browser_specific_settings']['gecko']['id']==b.ID
         profile=folder/'profile'
         profile.mkdir()
@@ -101,7 +105,7 @@ def main():
                   version:browser.runtime.getManifest().version,
                   gecko:browser.runtime.getManifest().browser_specific_settings?.gecko?.id
                 }));"""%json.dumps(marker))
-            assert stored=={'marker':marker,'version':'1.2.0','gecko':b.ID},stored
+            assert stored=={'marker':marker,'version':expected_old,'gecko':b.ID},stored
             print('B A08_DONOR_PRE_UPGRADE_PERSISTED_STATE=PASS',flush=True)
             # Use the real Firefox add-on-manager update path. Replacing a
             # cached XPI file under profile/extensions broke Gecko startup and
@@ -124,7 +128,7 @@ def main():
                 .createInstance(Components.interfaces.nsIFile);
               file.initWithPath(path);
               const before=await AddonManager.getAddonByID(ADDON_ID);
-              if(!before || before.version!=='1.2.0')
+              if(!before || before.version!==EXPECTED_OLD_VERSION)
                 throw Error('A08_PRE_UPGRADE_ADDON_VERSION_CHANGED');
               const install=await AddonManager.getInstallForFile(file);
               if(!install)throw Error('A08_ADDON_INSTALL_NOT_CREATED');
@@ -143,13 +147,13 @@ def main():
                 oldVersion:before.version,existingAddon:existing});
             })().catch(e=>done({ok:false,error:String(e),stack:String(e.stack)}));"""
             upgrade_js=upgrade_js.replace('TARGET',json.dumps(str(target))).replace(
-                'ADDON_ID',json.dumps(b.ID))
+                'ADDON_ID',json.dumps(b.ID)).replace('EXPECTED_OLD_VERSION',json.dumps(expected_old))
             b.call('POST',f'/session/{session}/timeouts',{
                 'script':40000,'pageLoad':15000})
             upgraded=b.call('POST',f'/session/{session}/execute/async',
                 {'script':upgrade_js,'args':[]},timeout=35)
             assert upgraded=={'ok':True,'stage':'UPDATE_SCHEDULED_NOT_YET_ACCEPTED',
-                'oldVersion':'1.2.0','existingAddon':True},upgraded
+                'oldVersion':expected_old,'existingAddon':True},upgraded
             print('B A08_UPGRADE_INTENT_SCHEDULED_NOT_ACCEPTED',flush=True)
             installed_path=profile/'extensions'/(b.ID+'.xpi')
             expected=hashlib.sha256(target.read_bytes()).hexdigest()
@@ -253,3 +257,14 @@ def main():
 if __name__=='__main__':
     if len(sys.argv)!=2:raise SystemExit('usage: a08-upgrade-firefox.py FILE.xpi')
     main()
+    # F4: donor-only upgrade cannot prove current combined-package upgrades.
+    # Rebuild the actual pinned 1.2.16 XPI from its verified source/digest.
+    with tempfile.TemporaryDirectory(prefix='pcms-f4-base-') as tmp:
+        previous=pathlib.Path(tmp)/'pcms-alpha-1.2.16.xpi'
+        helper=pathlib.Path(__file__).with_name('f4-previous-package.py')
+        spec_old=importlib.util.spec_from_file_location('pcms_f4_previous',helper)
+        module=importlib.util.module_from_spec(spec_old)
+        spec_old.loader.exec_module(module)
+        module.rebuild(previous)
+        main(previous_archive=previous)
+    print('B/H F4_REAL_1_2_16_TO_1_2_17_UPGRADE=PASS',flush=True)
