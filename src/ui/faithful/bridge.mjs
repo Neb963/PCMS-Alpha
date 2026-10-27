@@ -1315,6 +1315,31 @@ function openOperationRecord(op){
      finally{inspect.disabled=false;}
     })());inspect.dataset.operationRelated='';actions.append(inspect);
    }
+   if(c.archived===true){
+    guidance.textContent='This failed request was archived after verified no-dispatch evidence. Nothing was retried. Its original failure and permanent no-replay protection remain.';
+   }
+   if(c.evidence==='RECORDED_NO_DISPATCH'&&c.status==='PREFLIGHT_FAILED'&&
+      c.provenance==='HISTORICAL_SUPPLY_V1'){
+    const archive=b('Archive failed attempt',()=>void(async()=>{
+     if(!window.confirm('Archive this historical failed attempt? Its full failure history and no-replay protection remain. Nothing is retried.'))return;
+     archive.disabled=true;
+     try{
+      const result=await readPort('pcms-i02-canonical-readonly','ARCHIVE_HISTORICAL_NO_DISPATCH',
+        {operationId:c.operationId,expectedRevision:c.revision},15000);
+      if(result?.ok===true&&result.archived===true){
+       close();notify('Historical failed attempt archived. No remote operation was attempted.');void loadQueue(true);
+      }else{context.append(el('p','setting-note',result?.code==='STALE_REVISION'?
+       'The record changed. Check current status before archiving.':
+       'Archiving is held without independent no-dispatch evidence. Original record preserved.'));}
+     }catch{context.append(el('p','setting-note','Archiving was not confirmed. Check the saved status before another decision.'));}
+     finally{archive.disabled=false;}
+    })(),'btn small');
+    archive.dataset.operationRelated='';actions.append(archive);
+   }
+   if(c.evidence==='RECORDED_NO_DISPATCH'&&c.effectType==='supply_create_v1'&&c.related?.slug){
+    const fresh=b('Start separate new request',()=>{close();routeTo('generators');openGeneratorCreator()},'btn primary');
+    fresh.dataset.operationRelated='';actions.append(fresh);
+   }
    if(c.related?.generatorObserved){const target=b('Inspect generator',()=>{close();openSourceManager({slug:c.related.slug})});target.dataset.operationRelated='';actions.append(target)}
   }catch{if(overlay.isConnected)context.textContent='Saved details could not be checked. Retry; nothing was dispatched.'}
   finally{check.disabled=false;}
