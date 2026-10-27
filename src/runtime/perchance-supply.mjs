@@ -45,6 +45,7 @@ export async function perchanceSupplyIsolated(request) {
         // control read before accepting it.
         if(response.status===404&&endpoint==='getGeneratorPageData'&&unauthenticated)
           return {status:'pcms-observed-http-404'};
+        if(response.status===429)return {status:'too-many-requests'};
         if(response.status!==200||!String(response.headers.get('content-type')||'').includes('json'))
           return {status:'unverified'};
         const data=await response.json();
@@ -131,12 +132,14 @@ export async function perchanceSupplyIsolated(request) {
         const controlPage=await call('getGeneratorPageData',{
           generatorName:control},{unauthenticated:true});
         if(!sameSession())return hold('SESSION_CHANGED');
+        if(controlPage.status==='too-many-requests')return hold('PROVIDER_RATE_LIMITED');
         if(controlPage.status!=='success'||controlPage.generator?.name!==control||
            typeof controlPage.generator.publicId!=='string')
           return hold('TARGET_HTTP404_CONTROL_UNVERIFIED');
         if(all.length){
           const checked=await call('checkGeneratorOwnership',{generatorName:control});
           if(!sameSession())return hold('SESSION_CHANGED');
+          if(checked.status==='too-many-requests')return hold('PROVIDER_RATE_LIMITED');
           if(checked.status!=='is-owner')return hold('TARGET_HTTP404_CONTROL_UNVERIFIED');
         }
         return {ok:true};
