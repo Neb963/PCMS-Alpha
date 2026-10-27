@@ -181,6 +181,12 @@ test('I05 F: combined XPI entry and operator UI wire the read-only port, no stor
   for(const id of ['pcms-source-target','pcms-source-folder','pcms-source-token',
     'pcms-source-inspect','pcms-source-associate','pcms-source-recheck'])
     assert.match(html,new RegExp('id="'+id+'"'));
-  assert.match(html,/src="source-view\.mjs"/);
+  assert.match(html,/<script type="module" src="faithful\/bridge\.mjs"><\/script>/);
+  assert.doesNotMatch(html,/src="source-view\.mjs"/);
+  const primary=await readFile(new URL('../src/ui/faithful/bridge.mjs',import.meta.url),'utf8');
+  const source=await readFile(new URL('../src/ui/faithful/source-workspace.mjs',import.meta.url),'utf8');
+  assert.match(primary,/createSourceWorkspace/);
+  assert.match(source,/pcms-i05-source/);
+  assert.match(source,/INSPECT_SOURCE/);
   assert.doesNotMatch(ui,/storage\.local\.set|storage\.sync\.set/);
 });
