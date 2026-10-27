@@ -321,7 +321,10 @@ const rect=button.getBoundingClientRect();return {footer:!!button.closest('.draw
             background(s,"await browser.alarms.create('pcms-s04-creation-followup',{when:Date.now()+150});return true;");time.sleep(.4)
         assert [x['kind'] for x in oracle.effects]==['CREATE','RENAME','CREATE'],'cold uncertain CREATE must not replay or infer an unrelated temporary generator'
         a.click(s,'[data-nav=work-queue]');g.fill(s,'#queue-search',uncertain['createOperationId'])
-        a.wait(s,"!!sh.querySelector('.queue-item')",'ISSUE60_UNCERTAIN_QUEUE_ASYNC_RESULT');g.click_text(s,'Inspect','.queue-item')
+        # Search is debounced and background paging is asynchronous. A prior
+        # attention row is not the requested operation, even if it is clickable.
+        a.wait(s,"(()=>{const rows=[...sh.querySelectorAll('.queue-item')];return rows.length===1&&rows[0].textContent.includes('Outcome not confirmed')&&[...rows[0].querySelectorAll('button')].some(x=>x.textContent.trim()==='Inspect')})()",'ISSUE60_EXACT_UNCERTAIN_OPERATION_SEARCH_RESULT')
+        g.click_text(s,'Inspect','.queue-item')
         a.wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('issue60-uncertain-create')",'ISSUE60_MODERN_UNCERTAIN_CONTEXT_EXACT_SLUG')
         g.click_text(s,'Open account');a.wait(s,"!!sh.querySelector('.account-dialog')",'ISSUE60_MODERN_UNCERTAIN_ACCOUNT_ACTION');a.close_dialog(s)
         print('B ISSUE60_REAL_CREATE_LOST_ACK_COLD_NO_REPLAY_CONTEXTUAL_ACCOUNT_RECOVERY=PASS',flush=True)
