@@ -211,7 +211,7 @@ export function createCanonicalStore(db) {
         if(items.length>=limit){more=true;finish(ok({items,more,next:items.at(-1)?.operationId||null}));return;}
         items.push({operationId:op.operationId,targetId:op.targetId,
           effectType:op.effectType,status:op.status,revision:op.revision,
-          updatedAt:Number.isSafeInteger(op.updatedAt)?op.updatedAt:null});
+          updatedAt:Number.isSafeInteger(op.updatedAt)?op.updatedAt:null,archivedNoDispatch:op.archivedNoDispatch===true});
         row.continue();
       };
     });
@@ -245,6 +245,58 @@ export function createCanonicalStore(db) {
             const cursor=e.target.result;
             if(cursor){if(cursor.value?.operationId===operationId&&!eventStages.has(cursor.value.stage)){eventStages.add(cursor.value.stage);events.push({stage:cursor.value.stage});}cursor.continue();return;}
             finish(ok({context:projectOperationContext(op,links,events,inventory),providerEffects:'NONE'}));
+          };
+        };
+      };
+    });
+  }
+  // Operator-authorized archiving of a POSITIVELY proven pre-dispatch
+  // historical failure. This NEVER authorizes or replays provider effects.
+  // Original batch, firstFailure and preparation events remain intact.
+  function archiveHistoricalNoDispatch({operationId,expectedRevision}={}){
+    if(!isSafeId(operationId)||!Number.isSafeInteger(expectedRevision)||expectedRevision<1)
+      return Promise.resolve(fail('INVALID_TARGET'));
+    return transact(db,['operations','meta','events'],'readwrite',(tx,finish)=>{
+      const ops=tx.objectStore('operations'),eventsStore=tx.objectStore('events');
+      ops.get(operationId).onsuccess=e=>{
+        const op=e.target.result;
+        if(!op){finish(fail('OPERATION_NOT_FOUND'));return;}
+        if(op.revision!==expectedRevision){finish(fail('STALE_REVISION'));return;}
+        if(op.status!=='PREFLIGHT_FAILED'||op.archivedNoDispatch===true){
+          finish(fail('ARCHIVE_NOT_ADMISSIBLE'));return;
+        }
+        const links=[],events=[],eventStages=new Set();
+        tx.objectStore('meta').openCursor().onsuccess=e=>{
+          const cursor=e.target.result;
+          if(cursor){
+            if(typeof cursor.value.key==='string'&&cursor.value.key.startsWith('supply-batch:')){
+              const batch=cursor.value.value?.batch;
+              if(batch&&Array.isArray(batch.items))
+                for(const item of batch.items)if(item.itemId===op.targetId)links.push({batch,item});
+            }
+            cursor.continue();return;
+          }
+          eventsStore.openCursor().onsuccess=e=>{
+            const row=e.target.result;
+            if(row){
+              if(row.value?.operationId===operationId&&!eventStages.has(row.value.stage)){
+                eventStages.add(row.value.stage);events.push({stage:row.value.stage});
+              }
+              row.continue();return;
+            }
+            const context=projectOperationContext(op,links,events);
+            if(context.evidence!=='RECORDED_NO_DISPATCH'||
+               context.ambiguous||context.provenance!=='HISTORICAL_SUPPLY_V1'||
+               !/^supply_(create|rename)_v1$/.test(op.effectType||'')){
+              finish(fail('INDEPENDENT_NO_DISPATCH_PROOF_REQUIRED'));return;
+            }
+            const updated={...op,status:'ABORTED',originalStatus:'PREFLIGHT_FAILED',
+              archivedNoDispatch:true,revision:op.revision+1};
+            ops.put(updated);
+            eventsStore.add({stage:'HISTORICAL_PREFLIGHT_ARCHIVED',operationId,
+              revision:updated.revision});
+            finish(ok({archived:true,revision:updated.revision,providerEffects:'NONE',
+              replayAllowed:false}));
           };
         };
       };
@@ -586,7 +638,7 @@ export function createCanonicalStore(db) {
       };
     });
   }
-  return Object.freeze({ provisionTarget, apply, getOperation, inspectOperationContext, listOperationPage, summary, recover,
+  return Object.freeze({ provisionTarget, apply, getOperation, inspectOperationContext, archiveHistoricalNoDispatch, listOperationPage, summary, recover,
     recordNotice, resolveNotice, ignoreNotice, acknowledgeNotice, noticeSummary,
     listNotices, pageNotices, inspectNotice, pageNoticeGroups, pageNoticeMembers, close: () => db.close() });
 }
