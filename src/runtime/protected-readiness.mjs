@@ -82,7 +82,7 @@ export function createProtectedReadinessCoordinator(api,{list,connection,check,i
  // A donor-owned tunnel restart is a shared native mutation, not a route
  // probe or a license to rotate accounts. Persist possible dispatch first.
  // Never repeat it on a lost ACK; only a fresh healthy status ends the episode.
- const bridgeFailure=host=>host?.installed===true&&host.compatible===true&&host.ready===false&&
+ const bridgeFailure=host=>host?.installed===true&&host.compatible===true&&
    ['MULLVAD_TUNNEL_UNAVAILABLE','MULLVAD_PROXY_UNREACHABLE',
     'MULLVAD_TUNNEL_ROUTE_UNAVAILABLE'].includes(host.code);
  async function bridgeRecovery(host){
