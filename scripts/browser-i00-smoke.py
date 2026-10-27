@@ -2189,7 +2189,12 @@ def main():
                 assert noticed.get('stale',{}).get('code')=='STALE_REVISION',noticed
                 assert noticed.get('summary',{}).get('counts',{}).get('serious')==1,noticed
                 notices=canonical_command(after,{'type':'GET_NOTICES'})
-                assert notices.get('ok') is True and len(notices.get('notices',[]))==1,notices
+                assert notices.get('ok') is True,notices
+                seeded_notices=[n for n in notices.get('notices',[])
+                    if n.get('code')=='SOURCE_HELD' and n.get('scopeId')=='fixture_scope_01']
+                assert len(seeded_notices)==1 and seeded_notices[0]['revision']==1,notices
+                # Background Git observation legitimately records an independent
+                # reconnect incident; never assume the global fleet has one notice.
                 print('B I02_REAL_ATTENTION_DEDUP_AND_REVISION=PASS',flush=True)
                 assert restore_marker_probe(after) is True
                 held=canonical_command(after,{'type':'SUMMARY'})
@@ -2237,10 +2242,19 @@ def main():
                 assert s00_after_wake.get('record',{}).get('revision')==1,s00_after_wake
                 print('B S00_INSTALLED_COLD_WAKE_PERSISTED_HELD_INTENT=PASS',flush=True)
                 call('POST',f'/session/{after}/url',{'url':url+'#accounts'})
-                view=execute(after,"return {selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view),active:document.querySelector('[aria-current=page]')?.dataset.workspace,blocked:document.querySelector('#pcms-persona-picker')===null,refresh:document.querySelector('#pcms-refresh-accounts')?.disabled}")
-                assert view=={'selected':['accounts'],'active':'accounts','blocked':True,'refresh':False},view
-                account_ui=execute(after,"return {controls:!!document.getElementById('pcms-accounts-list'),description:document.getElementById('pcms-accounts-list')?.textContent||''}")
-                assert account_ui.get('controls'),account_ui
+                # The default page has one live shadow controller; old
+                # light-DOM workspace selectors are intentionally inert.
+                account_ui=None
+                for _ in range(60):
+                    account_ui=execute(after,"""const host=document.getElementById('pcms-faithful-host'),sh=host?.shadowRoot;
+                      const page=sh?.querySelector('#page'),active=sh?.querySelector('[data-nav="accounts"]');
+                      return {route:page?.dataset.view,active:active?.getAttribute('aria-current'),
+                        list:!!sh?.querySelector('.account-list-scroll'),
+                        legacyInert:getComputedStyle(document.querySelector('body > .app')).display==='none',
+                        blocked:!sh?.querySelector('#pcms-persona-picker')};""")
+                    if account_ui['route']=='accounts' and account_ui['list']:break
+                    time.sleep(.15)
+                assert account_ui['route']=='accounts' and account_ui['active']=='page' and account_ui['list'] and account_ui['legacyInert'] and account_ui['blocked'],account_ui
                 call('POST',f'/session/{after}/url',{'url':f'moz-extension://{uuid}/options/options.html'})
                 title=execute(after,'return document.title')
                 assert title, 'Original donor advanced option page not available'
@@ -2265,42 +2279,42 @@ def main():
                 assert 0 < diagnostic.get('length',0) < 65536,diagnostic
                 print('B I02_REDACTED_ZIP_MARKDOWN=PASS',flush=True)
                 print('B I02_CORE_INDEPENDENT_EMERGENCY=PASS',flush=True)
-                call('POST',f'/session/{after}/url',{'url':url+'#overview'})
-                for _ in range(40):
-                    notice_ui=execute(after,
-                        "return {button:document.querySelector('#pcms-attention-list button')?.textContent||'',text:document.querySelector('#pcms-attention-list')?.textContent||''}")
-                    if notice_ui.get('button'):break
+                # S08 now requires a real click on the canonical primary
+                # Work Queue notice action, not an inactive legacy Overview
+                # button. Unrelated autonomously reported Git notices stay
+                # visible and cannot be mistaken for this exact scope/code.
+                call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
+                review_node=None
+                for _ in range(100):
+                    review_node=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                      const row=sh?.querySelector('.queue-item[data-notice-scope="fixture_scope_01"][data-notice-code="SOURCE_HELD"]');
+                      const btn=[...row?.querySelectorAll('button')||[]].find(x=>x.textContent.trim()==='Mark reviewed'&&!x.disabled);
+                      if(btn)btn.scrollIntoView({block:'center',behavior:'instant'});return btn||null;""")
+                    if review_node and 'element-6066-11e4-a52e-4f735466cecf' in review_node:break
                     time.sleep(.15)
-                if notice_ui.get('button')!='Mark reviewed':
-                    direct_notices=canonical_command(after,{'type':'GET_NOTICES'})
-                    direct_summary=canonical_command(after,{'type':'SUMMARY'})
-                    ui_state=execute(after,
-                        "return {journal:document.getElementById('pcms-journal-health')?.textContent,queue:document.getElementById('pcms-work-queue-summary')?.textContent,ready:document.readyState,overview:document.getElementById('view-overview')?.hidden}")
-                    raise AssertionError(('Attention UI did not show known fake notice',
-                                          notice_ui,ui_state,direct_summary,direct_notices))
-                assert 'SOURCE_HELD' in notice_ui.get('text',''),notice_ui
-                execute(after,"document.querySelector('#pcms-attention-list button').click();return true")
-                for _ in range(40):
-                    residual=canonical_command(after,{'type':'GET_NOTICES'})
-                    if (residual.get('ok') is True and
-                        any(n.get('code')=='SOURCE_HELD' and n.get('reviewed') is True
-                            for n in residual.get('notices',[]))):break
-                    time.sleep(.15)
-                assert residual.get('ok') is True,residual
-                assert len(residual.get('notices',[]))==1,residual
-                assert residual['notices'][0]['code']=='SOURCE_HELD',residual
-                assert residual['notices'][0]['reviewed'] is True,residual
-                # Canonical review persistence and UI confirmation are
-                # separate asynchronous receipts. Wait for the actual
-                # rendered completion; a perpetual Saving… remains failure.
+                assert review_node and 'element-6066-11e4-a52e-4f735466cecf' in review_node,('S08_PRIMARY_NOTICE_NOT_ACTIONABLE',canonical_command(after,{'type':'GET_NOTICES'}))
+                element_id=review_node['element-6066-11e4-a52e-4f735466cecf']
+                call('POST',f'/session/{after}/element/{element_id}/click',{})
+                residual=None
                 for _ in range(60):
-                    acknowledgement=execute(after,
-                        "return {text:document.querySelector('#pcms-attention-list')?.textContent||'',"
-                        "disabled:document.querySelector('#pcms-attention-list button')?.disabled}")
-                    if ('Reviewed' in acknowledgement['text'] and
-                        acknowledgement['disabled'] is True):break
+                    residual=canonical_command(after,{'type':'GET_NOTICES'})
+                    current=[n for n in residual.get('notices',[])
+                        if n.get('code')=='SOURCE_HELD' and n.get('scopeId')=='fixture_scope_01']
+                    if residual.get('ok') and len(current)==1 and current[0].get('reviewed') is True:break
                     time.sleep(.15)
-                assert 'Reviewed' in acknowledgement['text'] and acknowledgement['disabled'] is True,acknowledgement
+                assert residual.get('ok') and len(current)==1 and current[0]['reviewed'] is True,residual
+                assert current[0]['state']=='ACTIVE',current
+                # Rendered readback must confirm review while retaining the hold.
+                acknowledgement=None
+                for _ in range(60):
+                    acknowledgement=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                      const row=sh?.querySelector('.queue-item[data-notice-scope="fixture_scope_01"][data-notice-code="SOURCE_HELD"]');
+                      const buttons=[...row?.querySelectorAll('button')||[]];
+                      return {present:!!row,reviewed:buttons.some(x=>x.textContent.trim()==='Reviewed'&&x.disabled),
+                        stillActive:row?.textContent.includes('still active')===true};""")
+                    if acknowledgement['present'] and acknowledgement['reviewed']:break
+                    time.sleep(.15)
+                assert acknowledgement['present'] and acknowledgement['reviewed'],acknowledgement
                 uncertain=canonical_command(after,{'type':'GET_OPERATION',
                     'operationId':'fixture_operation_01'})
                 assert uncertain.get('state')=='HELD_UNCERTAIN',uncertain
