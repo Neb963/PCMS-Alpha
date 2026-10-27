@@ -105,7 +105,12 @@ test('I12 packaging F: static graph/guarded fixed executor/view available; no di
   assert.match(entry,/observationGate:\(\)=>true,browserClockGate:\(\)=>true/);
   assert.match(entry,/refreshGate:\(\)=>true/);
   assert.equal((entry.match(/createRefresherBoundary\(browser/g)||[]).length,1);
-  assert.match(await readFile('src/ui/index.html','utf8'),/refresher-view\.mjs/);
+  const html=await readFile('src/ui/index.html','utf8');
+  const primary=await readFile('src/ui/faithful/bridge.mjs','utf8');
+  assert.match(html,/<script type="module" src="faithful\/bridge\.mjs"><\/script>/);
+  assert.doesNotMatch(html,/src="refresher-view\.mjs"/);
+  assert.match(primary,/createRefresherWorkspace/);
+  assert.match(primary,/pcms-i12-refresher/);
 });
 test('P54-08 X: current donor egress hashes, never route names, determine witness independence',async()=>{
   const same=await cachedHealthDomain({ok:true,data:{ip:'203.0.113.9'}});
