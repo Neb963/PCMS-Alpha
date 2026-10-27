@@ -2509,7 +2509,7 @@ def main():
                     if ai_inspector['visible'] and ai_inspector['readable']:break
                     time.sleep(.15)
                 assert ai_inspector['visible'] and ai_inspector['readable'],ai_inspector
-                execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[role=dialog][aria-label=\"AI development for i10-b-private\"] button[aria-label=Close]')?.click();return true")
+                execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[role=dialog][aria-label=\"AI development for i10-b-private\"] .drawer-head button').click();return true")
                 print('B I10_PRIMARY_AI_UNVERIFIED_JOB_INSPECTABLE_NO_PROVIDER_DISPATCH=PASS',flush=True)
                 # I10 B: durable uncertain native send on real IndexedDB, actual
                 # process-cold recovery state and full generator asset checkpoint.
