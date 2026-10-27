@@ -76,6 +76,26 @@ def main():
             assert observation.get('manifest')==mod.ID,observation
             assert observation.get('shadow'),('CLEAN_PRIMARY_NOT_MOUNTED',observation)
             assert observation.get('storageReady') and observation.get('alarmsReady'),observation
+            # A shadow root is attached synchronously before the primary
+            # controller asynchronously loads its templates/preferences and
+            # installs navigation handlers. Clicking before the explicit
+            # pcms-faithful-ready boundary silently loses the interaction.
+            # Wait for the real mounted, keyboard-accessible controller; do
+            # not retry the click, fabricate a route or weaken the oracle.
+            mounted=None
+            for _ in range(120):
+                mounted=mod.execute(session,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                  const page=sh?.querySelector('#page');
+                  const nav=sh?.querySelector('[data-nav="overview"]');
+                  return {ready:document.body.classList.contains('pcms-faithful-ready'),
+                    route:page?.dataset.view||null,
+                    current:nav?.getAttribute('aria-current')||null,
+                    navigation:[...sh?.querySelectorAll('[data-nav]')||[]].length,
+                    version:browser.runtime.getManifest().version};""")
+                if mounted['ready'] and mounted['route']=='overview' and mounted['current']=='page' and mounted['navigation']==6:break
+                time.sleep(.1)
+            assert mounted['ready'] and mounted['route']=='overview' and mounted['current']=='page' and mounted['navigation']==6,('A01_PRIMARY_INTERACTION_HANDLERS_NOT_READY',mounted)
+            print('B A01_PRIMARY_CONTROLLER_MOUNT_READY_BEFORE_NAVIGATION=PASS',flush=True)
             routes={}
             for route in ('overview','generators','work-queue','accounts','refresher','settings'):
                 mod.execute(session,"""const route=%s;
@@ -84,11 +104,16 @@ def main():
                   if(!button)throw Error('A01_MISSING_PRIMARY_NAV_'+route);
                   button.click();return true;"""%json.dumps(route))
                 selected=None
-                for _ in range(40):
-                    selected=mod.execute(session,"return document.getElementById('pcms-faithful-host')?.shadowRoot?.querySelector('#page')?.dataset.view")
-                    if selected==route:break
+                for _ in range(80):
+                    selected=mod.execute(session,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                      const route=ROUTE;
+                      return {page:sh?.querySelector('#page')?.dataset.view||null,
+                        current:sh?.querySelector('[data-nav="'+route+'"]')?.getAttribute('aria-current')||null,
+                        hash:location.hash.slice(1)};""".replace('ROUTE',json.dumps(route)))
+                    if selected['page']==route and selected['current']=='page' and selected['hash']==route:break
                     time.sleep(.1)
-                if selected!=route:raise AssertionError(('PRIMARY_ROUTE_NOT_RENDERED',route,selected))
+                if selected['page']!=route or selected['current']!='page' or selected['hash']!=route:
+                    raise AssertionError(('PRIMARY_ROUTE_NOT_RENDERED',route,selected))
                 routes[route]='SHOWN_READONLY_NO_EFFECT'
             # A04: exercise the real creator in the persistently installed
             # fully enabled XPI with 110 names (the old hard cap was 100).

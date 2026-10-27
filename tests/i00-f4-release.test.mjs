@@ -50,3 +50,15 @@ test('F4 operator release guide is versioned, short, safe, and separates live pr
   assert.match(guide,/not.*establish real Mullvad/i);
   assert.ok(guide.length<5800,'short final live acceptance guide');
 });
+
+test('F4 clean-home Firefox navigation starts only after canonical interactive mount and verifies each real route',async()=>{
+  const source=await readFile('scripts/a01-clean-firefox.py','utf8');
+  const mark=source.indexOf("document.body.classList.contains('pcms-faithful-ready')");
+  const click=source.indexOf('button.click();return true;');
+  assert.ok(mark>=0 && click>mark,'do not dispatch an unrecoverable early click before primary handlers mount');
+  assert.match(source,/A01_PRIMARY_INTERACTION_HANDLERS_NOT_READY/);
+  assert.match(source,/A01_PRIMARY_CONTROLLER_MOUNT_READY_BEFORE_NAVIGATION/);
+  assert.match(source,/getAttribute\('aria-current'\)/);
+  assert.match(source,/location\.hash\.slice\(1\)/);
+  assert.match(source,/PRIMARY_ROUTE_NOT_RENDERED/);
+});
