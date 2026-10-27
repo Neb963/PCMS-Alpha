@@ -120,6 +120,23 @@ export function createAccountBoundary(api,{
   const readiness=createProtectedReadinessCoordinator(api,{
     list:async()=>(await store()).list(),held:async()=>(await sentinel.inspect()).held,
     connection:async()=>guard()?.enrollmentDonor?.inspectConnection?.(),
+    // Use only the existing PersonaMonkey native lifecycle command. The
+    // donor's local mutation fence and fresh status/pending checks are the
+    // sole authority for restarting its shared tunnel.
+    repairBridge:async()=>{
+      let observed;
+      try{observed=(await api.runtime.sendMessage({type:'MULLVAD_STATUS'}))?.status;}
+      catch{return {ok:false,noDispatch:true,code:'MULLVAD_STATUS_UNAVAILABLE'};}
+      if(observed?.installed!==true||observed.compatible!==true||
+         observed.ready===true||!Array.isArray(observed.pending_prepare_routes)||
+         observed.pending_prepare_routes.length!==0||
+         !(observed.interface_up===false||observed.base_proxy_reachable===false||
+           observed.base_route_bound===false))
+        return {ok:false,noDispatch:true,code:'MULLVAD_REPAIR_NOT_ADMITTED'};
+      const reply=await api.runtime.sendMessage({type:'MULLVAD_RESTART',pcmsAutomatic:true});
+      if(reply?.restarted===false)return {ok:false,noDispatch:true,code:'MULLVAD_REPAIR_NOT_ADMITTED'};
+      return {ok:reply?.restarted===true&&reply.status?.ready===true};
+    },
     hold:(bindingId,code,accountId,current=()=>true)=>{
       pins.hold(bindingId);
       return checkpointed(api,async()=>{
