@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""Rebuild the previously verified combined XPI from its exact public Git tree.
+
+CI/developer fixture only. Never accesses the user's Firefox profile, secrets,
+private repositories, or live provider. Used to prove real installed 1.2.16
+-> 1.2.17 update, rather than testing solely donor 1.2.0 -> 1.2.17.
+"""
+import hashlib
+import json
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+import zipfile
+
+BASE_COMMIT = '9af3f86ac03b4aafa72eba9af51005a09ee8f6e9'
+BASE_TREE = '910a5ec71a76148d38954d04d7ee1167764eac86'
+BASE_XPI_SHA256 = 'e7ef3f63503909b210d42be379680fb9dc520a0937cdc4c3f27ae995b00a3402'
+GECKO_ID = 'persona-route-manager@local'
+
+
+def git(root, *args, capture=False):
+    return subprocess.run(['git', *args], cwd=root, check=True,
+                          text=capture, stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
+                          stderr=subprocess.PIPE if capture else None).stdout
+
+
+def rebuild(output):
+    root = pathlib.Path(__file__).resolve().parent.parent
+    output = pathlib.Path(output).resolve()
+    # A shallow Actions PR checkout normally lacks the previous release tree.
+    # Fetch an exact public SHA; never fetch, checkout or mutate a shared branch.
+    if subprocess.run(['git', 'cat-file', '-e', BASE_COMMIT + '^{commit}'],
+                      cwd=root, capture_output=True).returncode:
+        git(root, 'fetch', '--no-tags', '--depth=1', 'origin', BASE_COMMIT)
+    with tempfile.TemporaryDirectory(prefix='pcms-f4-previous-') as temp:
+        checkout = pathlib.Path(temp) / 'previous'
+        git(root, 'worktree', 'add', '--detach', str(checkout), BASE_COMMIT)
+        try:
+            assert git(checkout, 'rev-parse', 'HEAD', capture=True).strip() == BASE_COMMIT
+            assert git(checkout, 'rev-parse', 'HEAD^{tree}', capture=True).strip() == BASE_TREE
+            subprocess.run(['node', 'scripts/build-i00.mjs'], cwd=checkout,
+                           check=True, stdout=subprocess.DEVNULL)
+            old = checkout / 'build/pcms-alpha-i00.xpi'
+            raw = old.read_bytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            assert digest == BASE_XPI_SHA256, ('F4_PREVIOUS_RELEASE_BYTES_CHANGED', digest)
+            with zipfile.ZipFile(old) as archive:
+                manifest = json.loads(archive.read('manifest.json'))
+            assert manifest['version'] == '1.2.16', manifest
+            assert manifest['browser_specific_settings']['gecko']['id'] == GECKO_ID, manifest
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(raw)
+            print('D F4_PINNED_PREVIOUS_SOURCE_TREE_AND_XPI=PASS', flush=True)
+            return output
+        finally:
+            git(root, 'worktree', 'remove', '--force', str(checkout))
+
+
+if __name__ == '__main__':
+    if len(sys.argv) != 2:
+        raise SystemExit('usage: f4-previous-package.py /tmp/old-combined.xpi')
+    rebuild(sys.argv[1])

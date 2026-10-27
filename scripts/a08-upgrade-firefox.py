@@ -44,21 +44,25 @@ def wait_upgraded_runtime(session, expected_version, timeout_seconds=12):
     raise AssertionError(('A08_UPGRADED_RUNTIME_NOT_READY',last))
 
 
-def main():
+def main(previous_archive=None):
     target=pathlib.Path(sys.argv[1]).resolve()
     firefox=pathlib.Path(os.environ['FIREFOX_BINARY'])
     driver=pathlib.Path(os.environ['GECKODRIVER_BINARY'])
     root=pathlib.Path(__file__).resolve().parent.parent
     with tempfile.TemporaryDirectory(prefix='pcms-a08-upgrade-') as tmp:
         folder=pathlib.Path(tmp)
-        old=folder/'persona-donor.xpi'
-        subprocess.run([sys.executable,str(root/'scripts/zip-xpi.py'),
-            str(root/'donor/personamonkey/extension'),str(old)],check=True,
-            stdout=subprocess.DEVNULL)
+        old=folder/('pcms-previous.xpi' if previous_archive else 'persona-donor.xpi')
+        expected_old='1.2.16' if previous_archive else '1.2.0'
+        if previous_archive:
+            old.write_bytes(pathlib.Path(previous_archive).read_bytes())
+        else:
+            subprocess.run([sys.executable,str(root/'scripts/zip-xpi.py'),
+                str(root/'donor/personamonkey/extension'),str(old)],check=True,
+                stdout=subprocess.DEVNULL)
         import zipfile
         with zipfile.ZipFile(old) as z:
             m=json.loads(z.read('manifest.json'))
-            assert m['version']=='1.2.0',m['version']
+            assert m['version']==expected_old,m['version']
             assert m['browser_specific_settings']['gecko']['id']==b.ID
         profile=folder/'profile'
         profile.mkdir()
@@ -101,8 +105,37 @@ def main():
                   version:browser.runtime.getManifest().version,
                   gecko:browser.runtime.getManifest().browser_specific_settings?.gecko?.id
                 }));"""%json.dumps(marker))
-            assert stored=={'marker':marker,'version':'1.2.0','gecko':b.ID},stored
+            assert stored=={'marker':marker,'version':expected_old,'gecko':b.ID},stored
             print('B A08_DONOR_PRE_UPGRADE_PERSISTED_STATE=PASS',flush=True)
+            if previous_archive:
+                # Existing combined release: prove canonical IndexedDB survives
+                # the AddonManager update, not merely storage.local. Fixture
+                # lives solely in the disposable profile; no account or
+                # provider effect is submitted.
+                b.call('POST',f'/session/{session}/url',{
+                    'url':f'moz-extension://{uuid_before}/pcms/index.html'},timeout=30)
+                b.wait_donor_ready(session)
+                f4_mark="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const {openCanonicalDatabase}=await import('./journal.mjs');
+                  const db=await openCanonicalDatabase();
+                  try{
+                    await new Promise((resolve,reject)=>{
+                      const tx=db.transaction(['meta'],'readwrite');
+                      tx.objectStore('meta').put({key:'f4:upgrade-marker',
+                        value:{schema:1,accountBindings:'PRESERVED',
+                          operationReceipts:'PRESERVED',pendingSchedules:'PRESERVED'}});
+                      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+                      tx.onabort=()=>reject(tx.error);
+                    });
+                    done({ok:true});
+                  }finally{db.close()}
+                })().catch(e=>done({ok:false,error:String(e)}));"""
+                recorded=b.call('POST',f'/session/{session}/execute/async',
+                    {'script':f4_mark,'args':[]},timeout=30)
+                assert recorded=={'ok':True},('F4_CANONICAL_MARKER_NOT_PERSISTED',recorded)
+                print('B F4_OLD_COMBINED_CANONICAL_IDB_MARKER_PERSISTED=PASS',flush=True)
+
             # Use the real Firefox add-on-manager update path. Replacing a
             # cached XPI file under profile/extensions broke Gecko startup and
             # is not a valid install/upgrade test. No profile filesystem edit.
@@ -124,7 +157,7 @@ def main():
                 .createInstance(Components.interfaces.nsIFile);
               file.initWithPath(path);
               const before=await AddonManager.getAddonByID(ADDON_ID);
-              if(!before || before.version!=='1.2.0')
+              if(!before || before.version!==EXPECTED_OLD_VERSION)
                 throw Error('A08_PRE_UPGRADE_ADDON_VERSION_CHANGED');
               const install=await AddonManager.getInstallForFile(file);
               if(!install)throw Error('A08_ADDON_INSTALL_NOT_CREATED');
@@ -143,13 +176,13 @@ def main():
                 oldVersion:before.version,existingAddon:existing});
             })().catch(e=>done({ok:false,error:String(e),stack:String(e.stack)}));"""
             upgrade_js=upgrade_js.replace('TARGET',json.dumps(str(target))).replace(
-                'ADDON_ID',json.dumps(b.ID))
+                'ADDON_ID',json.dumps(b.ID)).replace('EXPECTED_OLD_VERSION',json.dumps(expected_old))
             b.call('POST',f'/session/{session}/timeouts',{
                 'script':40000,'pageLoad':15000})
             upgraded=b.call('POST',f'/session/{session}/execute/async',
                 {'script':upgrade_js,'args':[]},timeout=35)
             assert upgraded=={'ok':True,'stage':'UPDATE_SCHEDULED_NOT_YET_ACCEPTED',
-                'oldVersion':'1.2.0','existingAddon':True},upgraded
+                'oldVersion':expected_old,'existingAddon':True},upgraded
             print('B A08_UPGRADE_INTENT_SCHEDULED_NOT_ACCEPTED',flush=True)
             installed_path=profile/'extensions'/(b.ID+'.xpi')
             expected=hashlib.sha256(target.read_bytes()).hexdigest()
@@ -165,7 +198,7 @@ def main():
                   flush=True)
             # An XPI filesystem write can precede the AddonManager's durable
             # extensions.json version transition. Never close/restart Firefox
-            # until the manager's independent disk registry confirms 1.2.16;
+            # until the manager's independent disk registry confirms 1.2.17;
             # an uncommitted candidate remains a failed upgrade, not success.
             registry=profile/'extensions.json'
             registry_version=None
@@ -177,9 +210,9 @@ def main():
                     registry_version=rows[0].get('version') if len(rows)==1 else None
                 except (OSError,ValueError,IndexError,TypeError):
                     registry_version=None
-                if registry_version=='1.2.16':break
+                if registry_version=='1.2.17':break
                 time.sleep(.15)
-            assert registry_version=='1.2.16',(
+            assert registry_version=='1.2.17',(
                 'A08_ADDON_REGISTRY_UPDATE_NOT_COMMITTED',registry_version)
             print('H A08_FIREFOX_ADDON_REGISTRY_UPDATED_BEFORE_SHUTDOWN=PASS',
                   flush=True)
@@ -191,7 +224,7 @@ def main():
             b.call('POST',f'/session/{session}/url',{'url':'about:blank'},timeout=30)
             b.call('POST',f'/session/{session}/url',{
                 'url':f'moz-extension://{uuid_before}/pcms/index.html'},timeout=30)
-            wait_upgraded_runtime(session,'1.2.16')
+            wait_upgraded_runtime(session,'1.2.17')
             print('B A08_TARGET_RUNTIME_READY_BEFORE_SHUTDOWN=PASS',flush=True)
             exiting=b.owned_firefox_pids(profile)
             b.close(session);session=None
@@ -222,10 +255,31 @@ def main():
             assert uuid_before==uuid_after,'A08_GECKO_PRINCIPAL_UUID_CHANGED'
             b.call('POST',f'/session/{session}/url',{
                 'url':f'moz-extension://{uuid_after}/pcms/index.html'},timeout=30)
-            verified=wait_upgraded_runtime(session,'1.2.16')
+            verified=wait_upgraded_runtime(session,'1.2.17')
             retained=b.execute(session,"""return browser.storage.local.get(
                 'a08UpgradeCheckpoint').then(s=>s.a08UpgradeCheckpoint);""")
             assert retained==marker,('A08_UPGRADE_STORAGE_LOST',retained)
+            if previous_archive:
+                f4_read="""return (async()=>{
+                  const {openCanonicalDatabase}=await import('./journal.mjs');
+                  const db=await openCanonicalDatabase();
+                  try{
+                    return await new Promise((resolve,reject)=>{
+                      const tx=db.transaction(['meta'],'readonly');
+                      const rq=tx.objectStore('meta').get('f4:upgrade-marker');
+                      rq.onsuccess=()=>resolve(rq.result?.value||null);
+                      rq.onerror=()=>reject(rq.error);
+                    });
+                  }finally{db.close()}
+                })();"""
+                observed_marker=b.execute(session,f4_read)
+                assert observed_marker=={
+                    'schema':1,'accountBindings':'PRESERVED',
+                    'operationReceipts':'PRESERVED','pendingSchedules':'PRESERVED'},(
+                    'F4_COMBINED_CANONICAL_IDB_LOST_ON_UPGRADE',observed_marker)
+                print('B/H F4_EXISTING_COMBINED_CANONICAL_IDB_SURVIVES_COLD_UPDATE=PASS',
+                      flush=True)
+
             b.wait_donor_ready(session)
             assert not any(home.rglob('local.pcms.*.json')), 'A08_PCMS_HOST_REGISTERED'
             print('B A08_GENUINE_ADDON_MANAGER_UPGRADE_ID_AND_STORAGE_SURVIVE=PASS',
@@ -253,3 +307,14 @@ def main():
 if __name__=='__main__':
     if len(sys.argv)!=2:raise SystemExit('usage: a08-upgrade-firefox.py FILE.xpi')
     main()
+    # F4: donor-only upgrade cannot prove current combined-package upgrades.
+    # Rebuild the actual pinned 1.2.16 XPI from its verified source/digest.
+    with tempfile.TemporaryDirectory(prefix='pcms-f4-base-') as tmp:
+        previous=pathlib.Path(tmp)/'pcms-alpha-1.2.16.xpi'
+        helper=pathlib.Path(__file__).with_name('f4-previous-package.py')
+        spec_old=importlib.util.spec_from_file_location('pcms_f4_previous',helper)
+        module=importlib.util.module_from_spec(spec_old)
+        spec_old.loader.exec_module(module)
+        module.rebuild(previous)
+        main(previous_archive=previous)
+    print('B/H F4_REAL_1_2_16_TO_1_2_17_UPGRADE=PASS',flush=True)
