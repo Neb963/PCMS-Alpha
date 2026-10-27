@@ -31,7 +31,7 @@ async function fixture({duringRead,runSupplyStep=async()=>({ok:false,code:'TEMPL
  const runner=createCreationRunner(api,{open:async()=>db,makeStore:()=>store,
   createGit:()=>({step:async()=>{throw Error('NO_GIT')}}),guard:()=>guard,
   effectGate:()=>false,importGuard:async()=>({ok:true})});
- return {out:()=>runner.advance(item.intentId,item.revision),writes};
+ return {out:()=>runner.step(item.intentId,item.revision),writes};
 }
 test('F5 creation readback reports independently observed broken bridge instead of route/context generic',async()=>{
  const f=await fixture({duringRead:()=>({ready:false,code:'MULLVAD_PROXY_UNREACHABLE'})});
