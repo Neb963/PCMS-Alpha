@@ -128,7 +128,7 @@ export function createAccountBoundary(api,{
       try{observed=(await api.runtime.sendMessage({type:'MULLVAD_STATUS'}))?.status;}
       catch{return {ok:false,noDispatch:true,code:'MULLVAD_STATUS_UNAVAILABLE'};}
       if(observed?.installed!==true||observed.compatible!==true||
-         observed.ready===true||!Array.isArray(observed.pending_prepare_routes)||
+         (observed.ready===true&&observed.interface_up!==false&&observed.base_proxy_reachable!==false&&observed.base_route_bound!==false)||!Array.isArray(observed.pending_prepare_routes)||
          observed.pending_prepare_routes.length!==0||
          !(observed.interface_up===false||observed.base_proxy_reachable===false||
            observed.base_route_bound===false))
