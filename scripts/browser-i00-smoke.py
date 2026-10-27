@@ -4682,18 +4682,41 @@ def main():
 
                 # A02: a real source-incomplete fixture cannot be exported by
                 # the installed passwordless manual UI, unlike legacy V1.
-                assert execute(after,"document.getElementById('pcms-backup-export').click();return true")
-                guarded_status=''
-                for _ in range(80):
-                    guarded_status=execute(after,"return document.getElementById('pcms-backup-status')?.textContent||''")
-                    if 'Portable backup held:' in guarded_status:break
-                    time.sleep(.2)
-                assert 'Portable backup held: BACKUP_SOURCE_INCOMPLETE' in guarded_status,guarded_status
+                # The passwordless backup action lives in primary Settings,
+                # not the retired hidden exporter. Exercise the actual button
+                # against the source-incomplete archived fixture.
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-nav="settings"]').click();
+                  sh.querySelector('[data-settings="backups"]').click();return true;""")
+                ready=None
+                for _ in range(70):
+                    ready=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      const section=[...sh.querySelectorAll('section')].find(x=>x.querySelector('h2')?.textContent==='Backups');
+                      return {panel:!!section,download:!![...section?.querySelectorAll('button')||[]].find(x=>x.textContent.trim()==='Download complete backup')};""")
+                    if ready['panel'] and ready['download']:break
+                    time.sleep(.15)
+                assert ready['panel'] and ready['download'],ready
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  const sec=[...sh.querySelectorAll('section')].find(x=>x.querySelector('h2')?.textContent==='Backups');
+                  [...sec.querySelectorAll('button')].find(x=>x.textContent.trim()==='Download complete backup').click();return true;""")
+                guarded_status=None
+                for _ in range(100):
+                    guarded_status=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      const sec=[...sh.querySelectorAll('section')].find(x=>x.querySelector('h2')?.textContent==='Backups');
+                      return {message:sec?.querySelector('[role=status]')?.textContent||'',
+                        detail:sec?.querySelector('pre')?.textContent||''};""")
+                    if 'Backup did not complete' in guarded_status['message'] and 'BACKUP_SOURCE_INCOMPLETE' in guarded_status['detail']:break
+                    time.sleep(.15)
+                assert 'Backup did not complete' in guarded_status['message'] and 'BACKUP_SOURCE_INCOMPLETE' in guarded_status['detail'],guarded_status
                 print('B A02_UI_DENIES_SOURCE_INCOMPLETE_EXPORT=PASS',flush=True)
 
                 # A02 runtime status and retired native/vault dispatch are
                 # exercised on the actual production port, not a stub.
-                i15_ui=execute(after,"return {enabled:!!document.getElementById('pcms-auto-backup-enabled'),noVault:!document.getElementById('pcms-auto-backup-vault'),status:!!document.getElementById('pcms-auto-backup-status')}")
+                i15_ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  const sec=[...sh.querySelectorAll('section')].find(x=>x.querySelector('h2')?.textContent==='Backups');
+                  return {enabled:!!sec?.querySelector('#pcms-backup-daily'),
+                    noVault:!sh.querySelector('#pcms-auto-backup-vault'),
+                    status:!!sec?.querySelector('[role=status]')};""")
                 assert i15_ui=={'enabled':True,'noVault':True,'status':True},i15_ui
                 i15_result=call('POST',f'/session/{after}/execute/async',{
                   'script':"""const done=arguments[arguments.length-1];
