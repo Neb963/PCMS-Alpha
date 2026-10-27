@@ -270,7 +270,7 @@ export function createCanonicalStore(db) {
           const cursor=e.target.result;
           if(cursor){
             if(typeof cursor.value.key==='string'&&cursor.value.key.startsWith('supply-batch:')){
-              const batch=cursor.value.value?.batch;
+              const batch=cursor.value?.batch;
               if(batch&&Array.isArray(batch.items))
                 for(const item of batch.items)if(item.itemId===op.targetId)links.push({batch,item});
             }
