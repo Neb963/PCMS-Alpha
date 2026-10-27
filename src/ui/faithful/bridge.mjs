@@ -1246,11 +1246,11 @@ function openOperationRecord(op){
  const guidance=el('p','setting-note',help[op.status]||
   'This older request needs review. Its history is preserved and possible remote actions remain held.');
  body.append(guidance);
- const actions=el('div','form-foot');
+ const actions=el('div','drawer-foot');
  const check=b('Check saved status',()=>void loadContext(),'btn small');
  actions.append(check);
  actions.append(b('View current queue',()=>{close();void loadQueue(true)},'btn small'));
- body.append(actions);dialog.append(header,body);overlay.append(dialog);root.append(overlay);
+ dialog.append(header,body,actions);overlay.append(dialog);root.append(overlay);
  overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
  overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
  async function loadContext(){
