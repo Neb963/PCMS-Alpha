@@ -115,6 +115,7 @@ test('F5 ambiguous shared restart is fenced across cold workers, no blind second
   repairBridge:async()=>{mutations++;return {ok:false,code:'MULLVAD_RESTART_UNCONFIRMED'}}};
  assert.equal((await createProtectedReadinessCoordinator(api,opts).turn()).code,'MULLVAD_BRIDGE_RECOVERY_UNCERTAIN');
  assert.equal(mutations,1);assert.equal(store[BRIDGE_RECOVERY_RECEIPT].phase,'HELD');
+ now+=60000;
  const cold=await createProtectedReadinessCoordinator(api,opts).turn();
  assert.equal(cold.code,'MULLVAD_BRIDGE_RECOVERY_UNCERTAIN',JSON.stringify({cold,receipt:store[READINESS_RECEIPT],bridge:store[BRIDGE_RECOVERY_RECEIPT]}));
  assert.equal(mutations,1);
