@@ -4,7 +4,7 @@ import {OPERATION_STATES,operationGroup} from '../operation-context.mjs';
 import {installInteraction} from './interaction.mjs';
 import {mountOperatorChecklist} from '../operator-checklist.mjs';
 import {mountBackupWorkspace} from './backup-workspace.mjs';
-import {acknowledgeIncident,incidentDestination,readIncidentContext} from './attention.mjs';
+import {acknowledgeIncident,incidentDestination,readIncidentContext,incidentPrimaryAction} from './attention.mjs';
 import {createRefresherWorkspace} from './refresher-workspace.mjs';
 import {matchesReviewGroup} from '../review-queue-state.mjs';
 import {renderGitInventory,mountGitPromptEditor} from './git-workspace.mjs';
@@ -901,7 +901,7 @@ function displayQueue(){
     }catch{notify('Review not confirmed. Incident remains active.');}
     finally{action.disabled=n.reviewed;}
    });
-   const recovery=b('Open affected item',()=>void openIncident(n),'btn small');
+   const recovery=b(incidentPrimaryAction(n).label,()=>void openIncident(n),'btn small');
    action.disabled=n.reviewed||n.state==='RESOLVED';row.append(marker,detail,recovery,action);holder.append(row);
   }
   for(const op of q.operations){
@@ -1360,11 +1360,11 @@ async function openIncident(n){
   getOperation:operationId=>readPort('pcms-i02-canonical-readonly','GET_OPERATION_CONTEXT',{operationId})
  });
  const target=observed.destination;
- if(observed.ok&&['GIT_FOLDER_MISSING','GIT_FOLDER_RENAME_REVIEW'].includes(observed.notice.code)&&
+ if(observed.ok&&observed.targetState==='CURRENT'&&['GIT_FOLDER_MISSING','GIT_FOLDER_RENAME_REVIEW'].includes(observed.notice.code)&&
    observed.notice.target?.kind==='GENERATOR'){
   void openFolderContext(observed.notice.target.id);return;
  }
- if(target.kind==='SETTINGS'){
+ if(target.kind==='SETTINGS'&&incidentPrimaryAction(observed.notice).kind==='SETTINGS'){
   if(target.id==='refresher'){routeTo('refresher');return}
   state.settings=target.id;routeTo('settings');return;
  }
@@ -1404,7 +1404,7 @@ function openIncidentContext(observed){
   GIT_FOLDER_MISSING:'Inspect missing Git sources and retained local history. The live generator is preserved.',
   GIT_FOLDER_RENAME_REVIEW:'Review the recorded old and new source identities before choosing how to proceed.'
  };
- body.append(el('p','setting-note',help[n.code]||'Inspect current diagnostics before taking another action.'));
+ body.append(el('p','setting-note',help[n.code]||'The saved incident has no verified affected-entity reference. Inspect its original cause and choose the appropriate domain before changing anything.'));
  if(observed.targetState==='STALE')body.append(el('p','setting-note','The original target is no longer available in current records. Its saved incident is preserved.'));
  else if(observed.targetState==='UNAVAILABLE')body.append(el('p','setting-note','The current target could not be verified. Retry the read when its records are available.'));
  const actions=el('div','form-foot');
@@ -1552,7 +1552,7 @@ async function openIncidentGroup(group){
      target?.kind==='SETTINGS'?({backups:'Backups',connections:'Connections',refresher:'Refresher',diagnostics:'Diagnostics'})[target.id]:'Recorded affected item';
     data.append(el('strong','',label),el('p','setting-note',n.code.replaceAll('_',' ').toLowerCase()+' · '+n.count+' events'),
      statusPill(n.state==='RESOLVED'?'Recovered':n.reviewed?'Reviewed — still active':'Needs attention',n.state==='RESOLVED'?'green':'amber'));
-    row.append(data,b('Open affected item',()=>void openIncident(n)));
+    row.append(data,b(incidentPrimaryAction(n).label,()=>void openIncident(n)));
     if(n.state!=='RESOLVED'){
      const review=b(n.reviewed?'Reviewed':'Mark reviewed',()=>void(async()=>{
       review.disabled=true;
@@ -1639,7 +1639,7 @@ function displayOverview(){if(state.route!=='overview')return;
       (x.effectType||'Recorded operation').replaceAll('_',' ')),
       el('div','row-meta',x.severity?x.causalGroup?.memberCount>1?x.causalGroup.affectedCount+' affected items · '+x.causalGroup.eventCount+' events':x.reviewed?'Reviewed; still active':'Needs attention':
         'Target '+x.targetId+' · '+(queueState[x.status]?.[0]||'Unknown status')));
-    row.append(body,b(x.severity?'Open affected item':'Inspect operation',()=>x.severity?x.causalGroup?.memberCount>1?void openIncidentGroup(x.causalGroup):void openIncident(x):openOperationRecord(x)));panel.append(row);
+    row.append(body,b(x.severity?incidentPrimaryAction(x).label:'Inspect operation',()=>x.severity?x.causalGroup?.memberCount>1?void openIncidentGroup(x.causalGroup):void openIncident(x):openOperationRecord(x)));panel.append(row);
    }
   };
   listRows(0,[...(inc?.items||[]).map(g=>({...g.notice,causalGroup:{...g,queryState:'ACTIVE'}})),...(ops?.items||[])].slice(0,8));
