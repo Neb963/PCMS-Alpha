@@ -3488,11 +3488,19 @@ def main():
                 i14=call('POST',f'/session/{after}/execute/async',
                          {'script':i14_code,'args':[]},timeout=90)
                 assert i14.get('ok') is True,i14
-                ui=execute(after,"return {provider:document.getElementById('pcms-refresher-provider')?.textContent||'',summary:document.getElementById('pcms-refresher-summary')?.textContent||'',optIn:document.getElementById('pcms-refresher-enable')?.checked}")
-                assert ('refresh mutation OFF' in ui['provider'] and
-                        'qualified browser operating time' in ui['provider'] and
-                        ui['optIn'] is False and
-                        'visibility-held' in ui['summary']),ui
+                # The current user-facing Refresher policy is in the primary
+                # workspace; the retired source mutation status cannot render.
+                execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=refresher]').click();return true")
+                ui=None
+                for _ in range(60):
+                    ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      return {route:sh.querySelector('#page')?.dataset.view,
+                        enabled:sh.querySelector('[data-toggle="refresher"]')?.checked,
+                        switch:!!sh.querySelector('[data-toggle="refresher"]'),
+                        feed:sh.querySelector('.ref-feed-state strong')?.textContent||''};""")
+                    if ui['route']=='refresher' and ui['switch'] and ui['feed']:break
+                    time.sleep(.15)
+                assert ui['route']=='refresher' and ui['switch'] and ui['enabled'] is False and ui['feed'],ui
                 print('B I14_PACKAGED_PERSISTENT_IDB_GATED_EFFECTS_AND_REFERSHER_PROOF_UI=PASS',flush=True)
 
                 # I13 B: exact packaged XPI, real IndexedDB atomic approval
