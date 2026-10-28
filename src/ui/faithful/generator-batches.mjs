@@ -57,6 +57,20 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
   if(/ACCOUNT|LOGIN|SESSION/.test(code))return 'Complete account login or reactivation.';
   if(/GIT|ARCHIVE|SOURCE_CHECKPOINT/.test(code))return 'Check GitHub connection and original-source backup.';
   if(/UNKNOWN|UNCERTAIN|READBACK/.test(code))return 'Waiting for independent readback. A possible effect will not be repeated.';
+  if(code==='SESSION_REJECTED')return 'The original Perchance session was rejected. Open the affected account to verify login; no CREATE was dispatched.';
+  if(code==='PROVIDER_RATE_LIMITED')return 'Perchance rate-limited a read-only prerequisite. Keep the saved request; do not resubmit a second creation.';
+  if(code==='PROVIDER_UNAVAILABLE'||code==='TARGET_PAGE_TRANSPORT_UNAVAILABLE')
+   return 'The Perchance existence check could not be completed. It will be retried read-only; no CREATE was dispatched.';
+  if(code==='TARGET_OWNER_READBACK_UNVERIFIED')
+   return 'Perchance did not confirm the selected account’s ownership status for this slug. Nothing was created.';
+  if(code==='TARGET_PAGE_ABSENCE_UNVERIFIED')
+   return 'Perchance did not return a verified target-absence response. The existing request is held; no CREATE was dispatched.';
+  if(code==='TARGET_HTTP404_CONTROL_UNVERIFIED')
+   return 'Perchance returned HTTP 404, but the independent known-generator control read could not confirm that the lookup endpoint is healthy. No CREATE was dispatched.';
+  if(code==='TARGET_PAGE_IDENTITY_UNVERIFIED'||code==='TARGET_OWNED_PAGE_UNVERIFIED')
+   return 'The returned target page did not match the exact generator identity or expected ownership. No CREATE was dispatched.';
+  if(code==='TARGET_CENSUS_OWNER_CONFLICT')
+   return 'The authenticated owned-generator inventory conflicts with the independent ownership result. Synchronize this account and inspect the mismatch.';
   if(/PIN|CONFLICT|OWNERSHIP|TARGET/.test(code))return 'Inspect this generator’s account and source association.';
   return 'This item needs attention. Other items continue.';
  }

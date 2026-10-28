@@ -19,7 +19,7 @@ export function validateMap(map,audit,catalog){
 export function evaluateRun(map,receipt,digest){
  assert(receipt?.schema==='pcms.j07.full-browser-run/1'&&receipt.status==='PASS','J07_FULL_BROWSER_RUN_REQUIRED');
  assert(receipt.xpiSha256===digest&&/^[a-f0-9]{40}$/.test(receipt.checkoutSha||'')&&/^[a-f0-9]{40}$/.test(receipt.sourceTree||''),'J07_FOREIGN_SOURCE_OR_XPI');
- assert(receipt.geckoId==='persona-route-manager@local'&&receipt.version==='1.2.19','J07_WRONG_PACKAGE');
+ assert(receipt.geckoId==='persona-route-manager@local'&&receipt.version==='1.2.20','J07_WRONG_PACKAGE');
  assert(receipt.retainedSuites==='PASS','J07_RETAINED_SUITE_REQUIRED');
  assert(receipt.issue60Integration?.schema==='pcms.issue60.integration/1'&&receipt.issue60Integration.status==='PASS'&&receipt.issue60Integration.xpiSha256===digest,'ISSUE60_SAME_PACKAGE_INTEGRATION_REQUIRED');
  const required=Object.values(map.journeys).flatMap(j=>j.browser);

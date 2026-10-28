@@ -52,7 +52,7 @@ def main(previous_archive=None):
     with tempfile.TemporaryDirectory(prefix='pcms-a08-upgrade-') as tmp:
         folder=pathlib.Path(tmp)
         old=folder/('pcms-previous.xpi' if previous_archive else 'persona-donor.xpi')
-        expected_old='1.2.18' if previous_archive else '1.2.0'
+        expected_old='1.2.19' if previous_archive else '1.2.0'
         if previous_archive:
             old.write_bytes(pathlib.Path(previous_archive).read_bytes())
         else:
@@ -198,7 +198,7 @@ def main(previous_archive=None):
                   flush=True)
             # An XPI filesystem write can precede the AddonManager's durable
             # extensions.json version transition. Never close/restart Firefox
-            # until the manager's independent disk registry confirms 1.2.18;
+            # until the manager's independent disk registry confirms 1.2.19;
             # an uncommitted candidate remains a failed upgrade, not success.
             registry=profile/'extensions.json'
             registry_version=None
@@ -210,9 +210,9 @@ def main(previous_archive=None):
                     registry_version=rows[0].get('version') if len(rows)==1 else None
                 except (OSError,ValueError,IndexError,TypeError):
                     registry_version=None
-                if registry_version=='1.2.19':break
+                if registry_version=='1.2.20':break
                 time.sleep(.15)
-            assert registry_version=='1.2.19',(
+            assert registry_version=='1.2.20',(
                 'A08_ADDON_REGISTRY_UPDATE_NOT_COMMITTED',registry_version)
             print('H A08_FIREFOX_ADDON_REGISTRY_UPDATED_BEFORE_SHUTDOWN=PASS',
                   flush=True)
@@ -224,7 +224,7 @@ def main(previous_archive=None):
             b.call('POST',f'/session/{session}/url',{'url':'about:blank'},timeout=30)
             b.call('POST',f'/session/{session}/url',{
                 'url':f'moz-extension://{uuid_before}/pcms/index.html'},timeout=30)
-            wait_upgraded_runtime(session,'1.2.19')
+            wait_upgraded_runtime(session,'1.2.20')
             print('B A08_TARGET_RUNTIME_READY_BEFORE_SHUTDOWN=PASS',flush=True)
             exiting=b.owned_firefox_pids(profile)
             b.close(session);session=None
@@ -255,7 +255,7 @@ def main(previous_archive=None):
             assert uuid_before==uuid_after,'A08_GECKO_PRINCIPAL_UUID_CHANGED'
             b.call('POST',f'/session/{session}/url',{
                 'url':f'moz-extension://{uuid_after}/pcms/index.html'},timeout=30)
-            verified=wait_upgraded_runtime(session,'1.2.19')
+            verified=wait_upgraded_runtime(session,'1.2.20')
             retained=b.execute(session,"""return browser.storage.local.get(
                 'a08UpgradeCheckpoint').then(s=>s.a08UpgradeCheckpoint);""")
             assert retained==marker,('A08_UPGRADE_STORAGE_LOST',retained)
@@ -308,13 +308,13 @@ if __name__=='__main__':
     if len(sys.argv)!=2:raise SystemExit('usage: a08-upgrade-firefox.py FILE.xpi')
     main()
     # F4: donor-only upgrade cannot prove current combined-package upgrades.
-    # Rebuild the actual pinned 1.2.18 XPI from its verified source/digest.
+    # Rebuild the actual pinned 1.2.19 XPI from its verified source/digest.
     with tempfile.TemporaryDirectory(prefix='pcms-f4-base-') as tmp:
-        previous=pathlib.Path(tmp)/'pcms-alpha-1.2.18.xpi'
+        previous=pathlib.Path(tmp)/'pcms-alpha-1.2.19.xpi'
         helper=pathlib.Path(__file__).with_name('f4-previous-package.py')
         spec_old=importlib.util.spec_from_file_location('pcms_f4_previous',helper)
         module=importlib.util.module_from_spec(spec_old)
         spec_old.loader.exec_module(module)
         module.rebuild(previous)
         main(previous_archive=previous)
-    print('B/H F6_REAL_1_2_18_TO_1_2_19_UPGRADE=PASS',flush=True)
+    print('B/H F7_REAL_1_2_19_TO_1_2_20_UPGRADE=PASS',flush=True)

@@ -38,10 +38,20 @@ export async function perchanceSupplyIsolated(request) {
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify(unauthenticated?body:{email,sessionToken:user.sessionToken,...body}),
           signal:controller.signal});
+        // Some provider/CDN deployments report an absent generator with
+        // HTTP 404 rather than a JSON 200 missing-status. A 404 alone is
+        // NEVER absence proof: READ_TARGET requires the separate authenticated
+        // non-owner check, complete owner census and a positive same-endpoint
+        // control read before accepting it.
+        if(response.status===404&&endpoint==='getGeneratorPageData'&&unauthenticated)
+          return {status:'pcms-observed-http-404'};
+        if(response.status===429)return {status:'too-many-requests'};
         if(response.status!==200||!String(response.headers.get('content-type')||'').includes('json'))
           return {status:'unverified'};
         const data=await response.json();
-        return data&&typeof data==='object'&&!Array.isArray(data)?data:{status:'unverified'};
+        if(!data||typeof data!=='object'||Array.isArray(data)||
+           data.status==='pcms-observed-http-404')return {status:'unverified'};
+        return data;
       }catch{return {status:'unverified'};}
       finally{clearTimeout(timer);}
     }
@@ -71,9 +81,11 @@ export async function perchanceSupplyIsolated(request) {
         schemaVerified:true,fingerprint:[...new Uint8Array(bytes)].map(x=>x.toString(16).padStart(2,'0')).join('')};
     }
     const census=await call('getGeneratorsByUser',{});
+    if(!sameSession())return hold('SESSION_CHANGED');
+    if(census.status==='session-token-error')return hold('SESSION_REJECTED');
+    if(census.status==='too-many-requests')return hold('PROVIDER_RATE_LIMITED');
     if(census.status!=='success'||!Array.isArray(census.generators)||
-       census.generators.length>5000||!sameSession())
-      return hold('SESSION_UNVERIFIED');
+       census.generators.length>5000)return hold('SESSION_UNVERIFIED');
     const all=census.generators;
     const currentNames=new Set();
     for(const g of all){
@@ -102,30 +114,82 @@ export async function perchanceSupplyIsolated(request) {
         return hold('REMOTE_ID_UNVERIFIED');
       return {ok:true,remoteId:'public_'+publicId};
     };
-    if(request.kind==='READ_TARGET'){
-      // Two different provider observations; no census-absence shortcut.
-      // A valid current owner may be adopted, never treated as a new CREATE.
-      const owner=await call('checkGeneratorOwnership',{generatorName:request.slug});
-      const page=await call('getGeneratorPageData',{
-        generatorName:request.slug},{unauthenticated:true});
+    // Shared absence gate for READ_TARGET and the *independent* last checks
+    // inside CREATE/RENAME/RENAME_EXISTING. HTTP 404 alone is not proof:
+    // require current authenticated non-ownership, complete owner census
+    // omission and a positive same-endpoint control (when status is HTTP404).
+    const confirmAbsent=async(name,owner,page)=>{
       if(!sameSession())return hold('SESSION_CHANGED');
-      if(owner.status==='is-owner'&&page.status==='success'&&
-         page.generator?.name===request.slug&&
-         typeof page.generator.isPrivate==='boolean'&&
-         typeof page.generator.publicId==='string'&&
-         safeId('public_'+page.generator.publicId))
-        return {ok:true,source:'INDEPENDENT_TARGET_READBACK',
-          state:'OWNED_VERIFIED',ownerMatches:true,slug:request.slug,
-          remoteId:'public_'+page.generator.publicId,
-          visibility:page.generator.isPrivate?'UNLISTED':'PUBLIC'};
-      if(owner.status==='is-not-owner'&&page.status==='success')
-        return {ok:true,source:'INDEPENDENT_TARGET_READBACK',
-          state:'COLLISION',ownerMatches:false,slug:request.slug};
-      if(owner.status==='is-not-owner'&&
-         ['generator-does-not-exist','not-found'].includes(page.status))
-        return {ok:true,source:'INDEPENDENT_TARGET_READBACK',
-          state:'MISSING_VERIFIED',ownerMatches:false,slug:request.slug};
-      return hold('TARGET_OWNER_OR_ABSENCE_UNVERIFIED');
+      if(owner.status==='session-token-error')return hold('SESSION_REJECTED');
+      if(owner.status==='too-many-requests')return hold('PROVIDER_RATE_LIMITED');
+      if(owner.status!=='is-not-owner')return hold('TARGET_OWNER_READBACK_UNVERIFIED');
+      if(currentNames.has(name))return hold('TARGET_CENSUS_OWNER_CONFLICT');
+      if(['generator-does-not-exist','not-found'].includes(page.status))
+        return {ok:true};
+      if(page.status==='pcms-observed-http-404'){
+        const control=all[0]?.name||'minimal';
+        if(control===name)return hold('TARGET_HTTP404_CONTROL_UNVERIFIED');
+        const controlPage=await call('getGeneratorPageData',{
+          generatorName:control},{unauthenticated:true});
+        if(!sameSession())return hold('SESSION_CHANGED');
+        if(controlPage.status==='too-many-requests')return hold('PROVIDER_RATE_LIMITED');
+        if(controlPage.status!=='success'||controlPage.generator?.name!==control||
+           typeof controlPage.generator.publicId!=='string')
+          return hold('TARGET_HTTP404_CONTROL_UNVERIFIED');
+        if(all.length){
+          const checked=await call('checkGeneratorOwnership',{generatorName:control});
+          if(!sameSession())return hold('SESSION_CHANGED');
+          if(checked.status==='too-many-requests')return hold('PROVIDER_RATE_LIMITED');
+          if(checked.status!=='is-owner')return hold('TARGET_HTTP404_CONTROL_UNVERIFIED');
+        }
+        return {ok:true};
+      }
+      if(page.status==='too-many-requests')return hold('PROVIDER_RATE_LIMITED');
+      if(page.status==='server-error')return hold('PROVIDER_UNAVAILABLE');
+      if(page.status==='unverified')return hold('TARGET_PAGE_TRANSPORT_UNAVAILABLE');
+      return hold('TARGET_PAGE_ABSENCE_UNVERIFIED');
+    };
+    if(request.kind==='READ_TARGET'){
+      // Never infer a globally free slug merely because it is absent from
+      // this account's inventory. Owner and page-data APIs are independent.
+      // A possibly private/foreign generator is not create authorization.
+      const readTarget=async()=>({
+        owner:await call('checkGeneratorOwnership',{generatorName:request.slug}),
+        page:await call('getGeneratorPageData',{generatorName:request.slug},{unauthenticated:true})
+      });
+      let {owner,page}=await readTarget();
+      if(!sameSession())return hold('SESSION_CHANGED');
+      // One bounded *read-only* retry for a transport failure only. Do not
+      // retry possible CREATE/RENAME and do not turn unsupported statuses
+      // or a changed session into a successful absence claim.
+      if(owner.status==='unverified'||page.status==='unverified'){
+        ({owner,page}=await readTarget());
+        if(!sameSession())return hold('SESSION_CHANGED');
+      }
+      const ownedHere=currentNames.has(request.slug);
+      const verifiedPage=page.status==='success'&&
+        page.generator?.name===request.slug&&
+        typeof page.generator.isPrivate==='boolean'&&
+        typeof page.generator.publicId==='string'&&
+        safeId('public_'+page.generator.publicId);
+      const proof=(state,extra={})=>({ok:true,source:'INDEPENDENT_TARGET_READBACK',
+        state,slug:request.slug,ownerMatches:state==='OWNED_VERIFIED',...extra});
+      if(owner.status==='is-owner'){
+        if(!ownedHere)return hold('TARGET_CENSUS_OWNER_CONFLICT');
+        if(!verifiedPage)return hold('TARGET_OWNED_PAGE_UNVERIFIED');
+        return proof('OWNED_VERIFIED',{remoteId:'public_'+page.generator.publicId,
+          visibility:page.generator.isPrivate?'UNLISTED':'PUBLIC'});
+      }
+      if(owner.status==='is-not-owner'&&ownedHere)
+        return hold('TARGET_CENSUS_OWNER_CONFLICT');
+      if(page.status==='success'&&owner.status==='is-not-owner'){
+        // A success response without an exact, stable target ID is neither
+        // a collision nor absence. Never silently consume wrong-page data.
+        if(!verifiedPage)return hold('TARGET_PAGE_IDENTITY_UNVERIFIED');
+        return proof('COLLISION');
+      }
+      const absence=await confirmAbsent(request.slug,owner,page);
+      return absence.ok?proof('MISSING_VERIFIED'):absence;
     }
     if(request.kind==='READ_CREATE') {
       const checked=await read(request.temporarySlug);
@@ -150,8 +214,9 @@ export async function perchanceSupplyIsolated(request) {
       // Ensure target is not already taken independently of this account.
       const occupied=await call('getGeneratorPageData',{generatorName:request.slug},{unauthenticated:true});
       if(occupied.status==='success')return hold('SLUG_COLLISION');
-      if(!['generator-does-not-exist','not-found'].includes(occupied.status))
-        return hold('REMOTE_ABSENCE_UNVERIFIED');
+      const targetOwner=await call('checkGeneratorOwnership',{generatorName:request.slug});
+      const absence=await confirmAbsent(request.slug,targetOwner,occupied);
+      if(!absence.ok)return absence;
       const template=await call('getGeneratorPageData',{generatorName:'minimal'},{unauthenticated:true});
       if(template.status!=='success'||template.generator?.name!=='minimal')
         return hold('TEMPLATE_UNVERIFIED');
@@ -204,9 +269,8 @@ export async function perchanceSupplyIsolated(request) {
         return hold('EXISTING_OWNER_OR_REMOTE_ID_UNVERIFIED');
       if(currentNames.has(request.slug)||newPage.status==='success')
         return hold('TARGET_ALREADY_OCCUPIED');
-      if(newOwner.status==='is-owner'||
-         !['generator-does-not-exist','not-found'].includes(newPage.status))
-        return hold('TARGET_ABSENCE_UNVERIFIED');
+      const absence=await confirmAbsent(request.slug,newOwner,newPage);
+      if(!absence.ok)return absence;
       if(!sameSession())return hold('SESSION_CHANGED');
       const renamed=await call('changeGeneratorName',{
         currentName:request.temporarySlug,newName:request.slug});
@@ -222,8 +286,9 @@ export async function perchanceSupplyIsolated(request) {
       if(!checked.ok||checked.remoteId!==request.remoteId)return hold('TEMP_OWNER_UNVERIFIED');
       const target=await call('getGeneratorPageData',{generatorName:request.slug},{unauthenticated:true});
       if(target.status==='success')return hold('SLUG_COLLISION');
-      if(!['not-found','generator-does-not-exist'].includes(target.status))
-        return hold('REMOTE_ABSENCE_UNVERIFIED');
+      const targetOwner=await call('checkGeneratorOwnership',{generatorName:request.slug});
+      const absence=await confirmAbsent(request.slug,targetOwner,target);
+      if(!absence.ok)return absence;
       if(!sameSession())return hold('SESSION_CHANGED');
       const result=await call('changeGeneratorName',{
         currentName:request.temporarySlug,newName:request.slug});

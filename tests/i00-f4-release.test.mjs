@@ -11,7 +11,7 @@ test('F4 final combined package advances monotonically without donor/Gecko chang
   t.after(()=>rm(dir,{recursive:true,force:true}));
   const {original,combined,stage}=await buildI00({packageArchive:false,buildDirectory:dir});
   assert.equal(original.version,'1.2.0');
-  assert.equal(combined.version,'1.2.19');
+  assert.equal(combined.version,'1.2.20');
   assert.deepEqual(combined.browser_specific_settings,original.browser_specific_settings);
   assert.equal(combined.browser_specific_settings.gecko.id,'persona-route-manager@local');
   assert.deepEqual(combined.permissions,original.permissions);
@@ -27,22 +27,22 @@ test('F4 final combined package advances monotonically without donor/Gecko chang
 test('F4 existing-combined upgrade uses exact prior source and digest, genuine AOM update and real IDB cold readback',async()=>{
   const helper=await readFile('scripts/f4-previous-package.py','utf8');
   const upgrade=await readFile('scripts/a08-upgrade-firefox.py','utf8');
-  assert.match(helper,/a3081ad84d25dbc4d73b2bcb30af6761af2083fb/);
-  assert.match(helper,/3d1aae973f91319f9f9672e6d6d6df4d6277cbf8/);
-  assert.match(helper,/aa372c2aae803cab093f8453331b7f48c2ff274872594bc99c834160201e3fcc/);
+  assert.match(helper,/fabbc91307a2398ed64f4292ae0d49acb1e0a9f9/);
+  assert.match(helper,/ae725f42f365d732dcf0830f2ba1b869364bdfa2/);
+  assert.match(helper,/91ed1c2aba2f1fe4ca29c704fb731cef40464e74770962d55facb726f874a450/);
   assert.match(helper,/git\(root, 'worktree', 'add'/);
   assert.match(helper,/BASE_XPI_SHA256/);
   assert.match(upgrade,/main\(previous_archive=previous\)/);
   assert.match(upgrade,/installAddonFromAOMWithOptions/);
   assert.match(upgrade,/F4_EXISTING_COMBINED_CANONICAL_IDB_SURVIVES_COLD_UPDATE/);
-  assert.match(upgrade,/F6_REAL_1_2_18_TO_1_2_19_UPGRADE/);
-  assert.match(upgrade,/registry_version=='1.2.19'/);
+  assert.match(upgrade,/F7_REAL_1_2_19_TO_1_2_20_UPGRADE/);
+  assert.match(upgrade,/registry_version=='1.2.20'/);
   assert.doesNotMatch(upgrade,/MONKEY_PATCH|skipUpgrade|upgradeBypass/);
 });
 
 test('F4 operator release guide is versioned, short, safe, and separates live provider outcomes',async()=>{
   const guide=await readFile('docs/operator/OPERATOR-GUIDE.md','utf8');
-  for(const required of ['1.2.19','persona-route-manager@local','about:addons',
+  for(const required of ['1.2.20','persona-route-manager@local','about:addons',
     'Mullvad','Turnstile','Git','AI','Refresher','Backup','Work Queue',
     'source','unverified','unsigned'])
     assert.ok(guide.toLowerCase().includes(required.toLowerCase()),required);
