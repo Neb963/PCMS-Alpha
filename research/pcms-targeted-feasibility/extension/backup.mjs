@@ -3,9 +3,16 @@ import {restorePlan} from './recovery.mjs';
 const get=k=>browser.storage.local.get(k).then(x=>x[k]);
 async function site(scope,op,data){
   if(scope.origin!=='http://127.0.0.1:8765')throw Error('only synthetic loopback allowed');
-  const tab=await browser.tabs.create({url:scope.origin+'/site.html',cookieStoreId:scope.storeId,active:false});
+  const targetURL=scope.origin+'/site.html';
+  const tab=await browser.tabs.create({url:targetURL,cookieStoreId:scope.storeId,active:false});
   try{
-    for(let i=0;i<100;i++){if((await browser.tabs.get(tab.id)).status==='complete')break;await new Promise(r=>setTimeout(r,30));}
+    let ready=false;
+    for(let i=0;i<100;i++){
+      const current=await browser.tabs.get(tab.id);
+      if(current.status==='complete'&&current.url===targetURL){ready=true;break;}
+      await new Promise(r=>setTimeout(r,30));
+    }
+    if(!ready)throw Error('synthetic origin did not finish loading');
     await browser.scripting.executeScript({target:{tabId:tab.id},files:['site.js']});
     const [r]=await browser.scripting.executeScript({target:{tabId:tab.id},func:(op,data)=>globalThis.pcmsSiteProof(op,data),args:[op,data??null]});
     return r.result;

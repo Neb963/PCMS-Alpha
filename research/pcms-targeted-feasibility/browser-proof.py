@@ -123,6 +123,8 @@ def main():
             command(s,{'op':'disable'});disabled=command(s,{'op':'state'});n=len(disabled['effects']);command(s,{'op':'wakeProof'});time.sleep(1.3)
             after=command(s,{'op':'state'});assert len(after['effects'])==n and after['jobs']==disabled['jobs'];assert after['module']['package']==p2pkg
             record('A5','disabled host produces no additional effect, retains package and jobs',effects=n)
+            command(s,{'op':'enable'});command(s,{'op':'wakeProof'});wait_state(s,lambda x:len(x['effects'])>n);command(s,{'op':'disable'})
+            record('A6','explicit Enable resumes retained unfinished job without extension reinstall')
             f=json.loads((ROOT/'fixtures/source.json').read_text());seed=command(s,{'op':'seed','fixture':f})
             try:command(s,{'op':'capture','interrupt':True});raise AssertionError('missing fault')
             except RuntimeError as e:assert 'INJECTED_CAPTURE_INTERRUPTION' in str(e)
@@ -130,6 +132,8 @@ def main():
             assert not list(downloads.rglob('*.zip'))
             cut=sync(s,"return browser.storage.local.get(['captureStage','captureReceipt']);")
             assert cut.get('captureStage',{}).get('complete') is False and 'captureReceipt' not in cut
+            stop(s,pid);s=None;s,pid=start(firefox,p1,downloads);url=extension_url(s);ui(s,url)
+            assert command(s,{'op':'state'})['maintenance'] is True
             record('B1','capture cut retains durable hold; no final archive or receipt')
             receipt=command(s,{'op':'capture'});disk=pathlib.Path(receipt['filename']);src=verify(disk)
             assert src['sha256']==receipt['sha256'] and src['bytes']==receipt['bytes']
@@ -171,6 +175,11 @@ def main():
             record('B3','fresh profile, changed container IDs, exact data/cookie readback; uncertain mutation not replayed',mapping=mapping,jobs=restored['jobs'])
             record('B4','actual partial restore then OS restart retains hold; resumes same staging map and commits verified data',receipt=actual['receipt'])
             record('B5','corrupt archive rejected before restore writes; empty fresh target unchanged')
+            command(s,{'op':'enable'});command(s,{'op':'resumeRestoredProof'});command(s,{'op':'wakeProof'})
+            recovered=wait_state(s,lambda x:any(e['job']=='safe' for e in x['effects']))
+            assert not any(e['job']=='unknown' for e in recovered['effects'])
+            assert next(j for j in recovered['jobs'] if j['id']=='unknown')['status']=='Reconcile'
+            record('B6','after explicit enable and synthetic validation, safe job resumes; uncertain job still has no replay effect',effects=recovered['effects'])
         finally:
             if s:
                 try:stop(s,pid)

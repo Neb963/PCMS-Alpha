@@ -55,6 +55,12 @@ async function command(m,sender){
   if(m.op==='wakeProof'){
     s.due=Date.now()+100;await save(s);await schedule(s);return {scheduled:true};
   }
+  if(m.op==='resumeRestoredProof'){
+    if(!(await browser.storage.local.get('activeSnapshot')).activeSnapshot)throw Error('restore first');
+    // Synthetic local work only. This does not mark real login or routes verified.
+    for(const j of s.jobs)if(j.status==='Recover'){j.status='Waiting';j.checkpoint??=0;}
+    s.maintenance=false;s.paused=false;await save(s);await schedule(s);return {simulatedValidation:true};
+  }
   if(m.op==='install'){
     pkgOK(m.package);s.module&&(s.module.quiescing=true);await save(s);
     // Serial queue drains accepted finite steps before replacement. No long async external writes in this fixture.
