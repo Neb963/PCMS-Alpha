@@ -1,5 +1,5 @@
 // Known synthetic schema; does not claim to serialize arbitrary Perchance schemas.
-globalThis.pcmsSiteProof=async function(op,data){
+export async function siteProof(op,data){
   const req=r=>new Promise((resolve,reject)=>{r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
   const done=t=>new Promise((resolve,reject)=>{t.oncomplete=resolve;t.onabort=t.onerror=()=>reject(t.error);});
   const open=async()=>{const r=indexedDB.open('pcms-synthetic',1);r.onupgradeneeded=()=>{const s=r.result.createObjectStore('records');s.createIndex('byKind','kind');};return req(r);};
@@ -33,4 +33,3 @@ globalThis.pcmsSiteProof=async function(op,data){
   }
   throw Error('unknown synthetic site operation');
 };
-void 0; // executeScript files must return cloneable data, never the assigned function.

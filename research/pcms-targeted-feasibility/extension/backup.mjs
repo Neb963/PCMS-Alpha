@@ -1,5 +1,6 @@
 import {makeArchive,validate,hash} from './archive.mjs';
 import {restorePlan} from './recovery.mjs';
+import {siteProof} from './site.mjs';
 const get=k=>browser.storage.local.get(k).then(x=>x[k]);
 async function site(scope,op,data){
   if(scope.origin!=='http://127.0.0.1:8765')throw Error('only synthetic loopback allowed');
@@ -13,8 +14,9 @@ async function site(scope,op,data){
       await new Promise(r=>setTimeout(r,30));
     }
     if(!ready)throw Error('synthetic origin did not finish loading');
-    await browser.scripting.executeScript({target:{tabId:tab.id},files:['site.js']});
-    const [r]=await browser.scripting.executeScript({target:{tabId:tab.id},func:(op,data)=>globalThis.pcmsSiteProof(op,data),args:[op,data??null]});
+    const [r]=await browser.scripting.executeScript({target:{tabId:tab.id},func:siteProof,args:[op,data??null]});
+    if(r.error)throw Error(`site ${op}: ${r.error.message||String(r.error)}`);
+    if(!r.result)throw Error(`site ${op}: missing result`);
     return r.result;
   } finally{await browser.tabs.remove(tab.id);}
 }
