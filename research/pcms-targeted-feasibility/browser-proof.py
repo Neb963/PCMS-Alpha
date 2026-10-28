@@ -126,15 +126,6 @@ def main():
             command(s,{'op':'enable'});command(s,{'op':'wakeProof'});wait_state(s,lambda x:len(x['effects'])>n);command(s,{'op':'disable'})
             record('A6','explicit Enable resumes retained unfinished job without extension reinstall')
             f=json.loads((ROOT/'fixtures/source.json').read_text());seed=command(s,{'op':'seed','fixture':f})
-            try:command(s,{'op':'capture','interrupt':True});raise AssertionError('missing fault')
-            except RuntimeError as e:assert 'INJECTED_CAPTURE_INTERRUPTION' in str(e)
-            assert command(s,{'op':'state'})['maintenance'] is True
-            assert not list(downloads.rglob('*.zip'))
-            cut=sync(s,"return browser.storage.local.get(['captureStage','captureReceipt']);")
-            assert cut.get('captureStage',{}).get('complete') is False and 'captureReceipt' not in cut
-            stop(s,pid);s=None;s,pid=start(firefox,p1,downloads);url=extension_url(s);ui(s,url)
-            assert command(s,{'op':'state'})['maintenance'] is True
-            record('B1','capture cut retains durable hold; no final archive or receipt')
             receipt=command(s,{'op':'capture'});disk=pathlib.Path(receipt['filename']);src=verify(disk)
             assert src['sha256']==receipt['sha256'] and src['bytes']==receipt['bytes']
             source=src['sections'];assert source['credentials']==f['credentials'] and source['sources']==f['sources']
@@ -147,6 +138,16 @@ def main():
                 assert sorted(source['indexedDB'][i]['databases'][0]['stores'][0]['records'],key=lambda x:x['key'])==sorted(f['indexedDB'][i]['databases'][0]['stores'][0]['records'],key=lambda x:x['key'])
             assert len(source['cookies'])==4
             record('B2','Downloads archive independently reopened with Python CRC/SHA; all source categories present',bytes=src['bytes'],sha256=src['sha256'],sourceMapping=seed['mapping'])
+            try:command(s,{'op':'capture','interrupt':True});raise AssertionError('missing fault')
+            except RuntimeError as e:assert 'INJECTED_CAPTURE_INTERRUPTION' in str(e)
+            assert command(s,{'op':'state'})['maintenance'] is True
+            assert len(list(downloads.rglob('*.zip')))==1
+            assert verify(disk)['sha256']==src['sha256']
+            cut=sync(s,"return browser.storage.local.get(['captureStage','captureReceipt']);")
+            assert cut.get('captureStage',{}).get('complete') is False and cut['captureReceipt']==receipt
+            stop(s,pid);s=None;s,pid=start(firefox,p1,downloads);url=extension_url(s);ui(s,url)
+            assert command(s,{'op':'state'})['maintenance'] is True
+            record('B1','next capture cut retains durable hold across restart; earlier complete file and receipt unchanged')
             stop(s,pid);s=None
             p2=t/'fresh-target-profile';assert not p2.exists();s,pid=start(firefox,p2,t/'target-downloads')
             call('POST',f'/session/{s}/moz/addon/install',{'path':str(xpi),'temporary':False});url=extension_url(s);ui(s,url)

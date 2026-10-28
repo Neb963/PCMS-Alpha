@@ -45,8 +45,9 @@ which normal Firefox runs, or retain the environmental failure.
    Disable and Enable. Nothing opens Perchance.
 4. Seeds representative extension records plus real loopback origin
    localStorage, IndexedDB, OPFS and cookies in two created containers.
-5. Cuts capture after a partial collector read. Restarts Firefox with the
-   maintenance barrier still set. Captures again and exports through Downloads.
+5. Exports a complete capture through Downloads, then cuts the next capture
+   after a partial collector read. Restarts Firefox with the maintenance barrier
+   still set and the earlier complete archive/receipt unchanged.
 6. Independently reopens the disk ZIP with Python and validates CRC, sizes,
    entry hashes, manifest hash and mandatory category coverage.
 7. Installs the XPI into a second, previously nonexistent Firefox profile.
