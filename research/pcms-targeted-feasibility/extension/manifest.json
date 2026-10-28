@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "PCMS disposable feasibility proof",
+  "version": "0.0.1",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "pcms-targeted-feasibility@example.invalid",
+      "strict_min_version": "154.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    }
+  },
+  "permissions": [
+    "storage",
+    "alarms",
+    "downloads",
+    "cookies",
+    "contextualIdentities",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "page": "bg.html",
+    "persistent": false
+  },
+  "action": {
+    "default_title": "Disposable PCMS proof"
+  },
+  "sandbox": {
+    "pages": [
+      "sandbox.html"
+    ]
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self';",
+    "sandbox": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'unsafe-inline'; connect-src 'none'; worker-src 'none'; frame-src 'none';"
+  }
+}

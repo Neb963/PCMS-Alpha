@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
+import {spawnSync} from 'node:child_process';
+import {fixture} from './fixtures/fixture.mjs';
+import {makeArchive,validate,unzip,zip,jsonBytes,enc,hash} from './extension/archive.mjs';
+import {restorePlan,admit} from './extension/recovery.mjs';
+const dir=new URL('./evidence/',import.meta.url);await mkdir(dir,{recursive:true});
+const f=await fixture();await writeFile(new URL('./fixtures/source.json',import.meta.url),JSON.stringify(f,null,2));
+const bytes=await makeArchive(f);const archive=new URL('synthetic-node-export.zip',dir);await writeFile(archive,bytes);
+const reopened=new Uint8Array(await readFile(archive));assert.deepEqual((await validate(reopened)).sections,f);
+const results=[{id:'D1',status:'PASS',tier:'SYNTHETIC_DISK',oracle:'independent reopen plus exact sections equality',bytes:bytes.length,sha256:await hash(bytes)}];
+const py=spawnSync('python3',[new URL('./verify_archive.py',import.meta.url).pathname,archive.pathname],{encoding:'utf8'});assert.equal(py.status,0,py.stderr);results.push({id:'D2',status:'PASS',tier:'SYNTHETIC_DISK',oracle:'Python zipfile CRC and SHA256',observed:JSON.parse(py.stdout)});
+const mapping={'firefox-container-17':'firefox-container-71','firefox-container-29':'firefox-container-82'};
+const r=restorePlan(f,mapping);assert.equal(r.personas.items[0].cookieStoreId,'firefox-container-71');assert.equal(r.cookies[0].storeId,'firefox-container-71');assert.equal(r.indexedDB[1].storeId,'firefox-container-82');
+assert.equal(r.core.jobs[1].status,'Reconcile');assert.equal(r.core.jobs[0].status,'Recover');assert.equal(r.core.paused,true);assert.equal(r.core.jobs[1].lease,undefined);assert.deepEqual(r.sources,f.sources);assert.deepEqual(r.credentials,f.credentials);
+assert.throws(()=>restorePlan(f,{}),/unmapped/);const mismatch=structuredClone(f);mismatch.core.jobs[0].jobABI=99;assert.equal(restorePlan(mismatch,mapping).core.jobs[0].status,'Incompatible');
+results.push({id:'D3',status:'PASS',tier:'SYNTHETIC',oracle:'container mapping, data equality, uncertain job held, incompatible job held'});
+const damaged=bytes.slice();damaged[200]^=1;await assert.rejects(validate(damaged));await assert.rejects(validate(bytes.slice(0,-1)));
+await assert.rejects(validate(await makeArchive(f,{complete:false,missing:['native']})));
+const entries=unzip(bytes);entries.delete('data/opfs.json');await assert.rejects(validate(zip([...entries])));
+const incompatible=unzip(bytes),m=JSON.parse(new TextDecoder().decode(incompatible.get('manifest.json')));m.version=99;const mb=jsonBytes(m);incompatible.set('manifest.json',mb);incompatible.set('manifest.sha256',enc.encode(await hash(mb)));await assert.rejects(validate(zip([...incompatible])));
+results.push({id:'D4',status:'PASS',tier:'SYNTHETIC',oracle:'corrupted, truncated, incomplete, missing and incompatible archives rejected'});
+const state={module:{version:'2',epoch:2,enabled:true},paused:false,maintenance:false};admit(state,{version:'2',epoch:2},'effect');assert.throws(()=>admit(state,{version:'1',epoch:1},'effect'),/revoked/);state.module.enabled=false;assert.throws(()=>admit(state,{version:'2',epoch:2},'job'),/revoked/);
+results.push({id:'D5',status:'PASS',tier:'SYNTHETIC',oracle:'generation fence rejects stale and disabled requests; not browser lifecycle proof'});
+// Actual torn archive bytes must fail before any restore. Storage crash recovery is browser-only.
+await writeFile(new URL('interrupted-capture.partial',dir),bytes.slice(0,Math.floor(bytes.length/2)));await assert.rejects(validate(new Uint8Array(await readFile(new URL('interrupted-capture.partial',dir)))));
+results.push({id:'D6',status:'PASS',tier:'SYNTHETIC_DISK',oracle:'partial disk archive rejected; browser interruption NOT TESTED here'});
+await writeFile(new URL('offline-results.json',dir),JSON.stringify(results,null,2)+'\n');console.log(JSON.stringify(results));
