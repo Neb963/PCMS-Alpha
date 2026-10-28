@@ -1,0 +1,9 @@
+{
+  "id": "synthetic-module",
+  "version": "1",
+  "coreABI": 1,
+  "jobABI": 1,
+  "background": "const n=(context.checkpoint||0)+1; await api(\"checkpoint\",{n,version:\"1\"}); await api(\"effect\",{label:\"v1-step-\"+n});",
+  "ui": "const b=document.createElement(\"button\"); b.textContent=\"Run v1 background job\"; b.onclick=()=>api(\"job\",{input:\"draft input retained\"}).then(()=>b.textContent=\"Job queued v1\").catch(e=>b.textContent=e.message); document.body.append(b);",
+  "page": "// Page execution primitive is inherited evidence; lifecycle requires donor adapter."
+}
