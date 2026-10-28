@@ -13,7 +13,10 @@ export function advanceS04Effect(record,event,proof={}){
   if(event==='TARGET_OBSERVED'){
     if(old!=='OWNER_READBACK_PENDING'||proof.source!=='INDEPENDENT_TARGET_READBACK'||
        proof.slug!==record.slug)return bad('TARGET_READBACK_REQUIRED');
-    if(proof.state==='MISSING_VERIFIED'){
+    if(proof.state==='CLAIM_CANDIDATE'||proof.state==='MISSING_VERIFIED'){
+       // Legacy durable state name retained for existing journals. A claim
+       // candidate is not proof that the slug is globally unclaimed; only
+       // the eventual provider rename can establish that.
       next.state='OWNER_MISSING_VERIFIED';next.hold=null;
     }else if(proof.state==='OWNED_VERIFIED'&&
       proof.ownerMatches===true&&remote(proof.remoteId)&&
