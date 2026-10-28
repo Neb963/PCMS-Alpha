@@ -54,10 +54,9 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
    return 'The fresh census could not verify every owned item. Inspect the affected account inventory.';
   if(/INVENTORY|(?:^|_)COUNT(?:_|$)/.test(code))return 'Protected inventory readback is needed before generator creation.';
   if(/ROUTE|GUARD|DONOR/.test(code))return 'Check the account’s protected route.';
+  if(code==='SESSION_REJECTED')return 'Perchance rejected the account session. Verify login in Accounts before retrying.';
   if(/ACCOUNT|LOGIN|SESSION/.test(code))return 'Complete account login or reactivation.';
   if(/GIT|ARCHIVE|SOURCE_CHECKPOINT/.test(code))return 'Check GitHub connection and original-source backup.';
-  if(/UNKNOWN|UNCERTAIN|READBACK/.test(code))return 'Waiting for independent readback. A possible effect will not be repeated.';
-  if(code==='SESSION_REJECTED')return 'The original Perchance session was rejected. Open the affected account to verify login; no CREATE was dispatched.';
   if(code==='PROVIDER_RATE_LIMITED')return 'Perchance rate-limited a read-only prerequisite. Keep the saved request; do not resubmit a second creation.';
   if(code==='PROVIDER_UNAVAILABLE'||code==='TARGET_PAGE_TRANSPORT_UNAVAILABLE')
    return 'The Perchance existence check could not be completed. It will be retried read-only; no CREATE was dispatched.';
@@ -71,6 +70,9 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
    return 'The returned target page did not match the exact generator identity or expected ownership. No CREATE was dispatched.';
   if(code==='TARGET_CENSUS_OWNER_CONFLICT')
    return 'The authenticated owned-generator inventory conflicts with the independent ownership result. Synchronize this account and inspect the mismatch.';
+  if(code==='TEMPLATE_OWNED_BY_TARGET')
+   return 'The selected account already owns the minimal template name. Review that account before creating a copy.';
+  if(/UNKNOWN|UNCERTAIN|READBACK/.test(code))return 'Waiting for independent readback. A possible effect will not be repeated.';
   if(/PIN|CONFLICT|OWNERSHIP|TARGET/.test(code))return 'Inspect this generator’s account and source association.';
   return 'This item needs attention. Other items continue.';
  }

@@ -1913,6 +1913,29 @@
     },
     {
       "domain": "creation",
+      "state": "CLAIM_CANDIDATE",
+      "owner": [
+        "src/runtime/creation-effects.mjs",
+        "src/runtime/creation-intake.mjs",
+        "src/runtime/creation-runner.mjs",
+        "src/runtime/creation-git-runner.mjs",
+        "src/runtime/creation-batch.mjs",
+        "src/runtime/coordinator-store.mjs"
+      ],
+      "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
+      "automaticHandler": "src/runtime/creation-runner.mjs#step",
+      "operatorAction": "Inspect per-item owner/source and current account; resolve an actual pin/source conflict.",
+      "prerequisites": "Standing scoped intent, known counts, fresh protected account/owner, persisted effect intent; I17 quarantine excluded.",
+      "destination": "Generators / Work Queue",
+      "settlement": "Independent attributable owner, private-empty bytes, remote identity and conditional Git association.",
+      "retry": "Bounded domain alarm; reread current canonical revisions before progression.",
+      "timeout": "An observation deadline never cancels a possibly dispatched effect.",
+      "cancellation": "Pause prevents new effects; retain ownership until independent settlement.",
+      "uncertainty": "Read-only reconciliation; no blind replay, reassignment or expired-lock stealing.",
+      "safetyHold": null
+    },
+    {
+      "domain": "creation",
       "state": "COLLISION",
       "owner": [
         "src/runtime/creation-effects.mjs",
