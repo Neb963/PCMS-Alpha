@@ -150,46 +150,53 @@ export async function perchanceSupplyIsolated(request) {
       return hold('TARGET_PAGE_ABSENCE_UNVERIFIED');
     };
     if(request.kind==='READ_TARGET'){
-      // Never infer a globally free slug merely because it is absent from
-      // this account's inventory. Owner and page-data APIs are independent.
-      // A possibly private/foreign generator is not create authorization.
-      const readTarget=async()=>({
-        owner:await call('checkGeneratorOwnership',{generatorName:request.slug}),
-        page:await call('getGeneratorPageData',{generatorName:request.slug},{unauthenticated:true})
-      });
-      let {owner,page}=await readTarget();
-      if(!sameSession())return hold('SESSION_CHANGED');
-      // One bounded *read-only* retry for a transport failure only. Do not
-      // retry possible CREATE/RENAME and do not turn unsupported statuses
-      // or a changed session into a successful absence claim.
-      if(owner.status==='unverified'||page.status==='unverified'){
-        ({owner,page}=await readTarget());
-        if(!sameSession())return hold('SESSION_CHANGED');
-      }
-      const ownedHere=currentNames.has(request.slug);
-      const verifiedPage=page.status==='success'&&
-        page.generator?.name===request.slug&&
-        typeof page.generator.isPrivate==='boolean'&&
-        typeof page.generator.publicId==='string'&&
-        safeId('public_'+page.generator.publicId);
+      // A new name has no owner to prove. The authenticated owned-generator
+      // census is authoritative for deciding whether this account must adopt.
+      // A public page read can reject a clearly occupied name early, but its
+      // failure is not a prerequisite to asking Perchance to claim the name.
+      // The server enforces uniqueness during changeGeneratorName.
       const proof=(state,extra={})=>({ok:true,source:'INDEPENDENT_TARGET_READBACK',
         state,slug:request.slug,ownerMatches:state==='OWNED_VERIFIED',...extra});
-      if(owner.status==='is-owner'){
-        if(!ownedHere)return hold('TARGET_CENSUS_OWNER_CONFLICT');
-        if(!verifiedPage)return hold('TARGET_OWNED_PAGE_UNVERIFIED');
-        return proof('OWNED_VERIFIED',{remoteId:'public_'+page.generator.publicId,
-          visibility:page.generator.isPrivate?'UNLISTED':'PUBLIC'});
+      const ownedHere=currentNames.has(request.slug);
+      if(ownedHere){
+        const owner=await call('checkGeneratorOwnership',{generatorName:request.slug});
+        if(!sameSession())return hold('SESSION_CHANGED');
+        if(owner.status==='session-token-error')return hold('SESSION_REJECTED');
+        if(owner.status==='too-many-requests')return hold('PROVIDER_RATE_LIMITED');
+        if(owner.status!=='is-owner')return hold('TARGET_CENSUS_OWNER_CONFLICT');
+        const page=await call('getGeneratorPageData',{generatorName:request.slug},{unauthenticated:true});
+        if(!sameSession())return hold('SESSION_CHANGED');
+        if(page.status==='too-many-requests')return hold('PROVIDER_RATE_LIMITED');
+        const g=page.generator;
+        if(page.status!=='success'||g?.name!==request.slug||
+           typeof g.isPrivate!=='boolean'||typeof g.publicId!=='string'||
+           !safeId('public_'+g.publicId))return hold('TARGET_OWNED_PAGE_UNVERIFIED');
+        return proof('OWNED_VERIFIED',{remoteId:'public_'+g.publicId,
+          visibility:g.isPrivate?'UNLISTED':'PUBLIC'});
       }
-      if(owner.status==='is-not-owner'&&ownedHere)
-        return hold('TARGET_CENSUS_OWNER_CONFLICT');
-      if(page.status==='success'&&owner.status==='is-not-owner'){
-        // A success response without an exact, stable target ID is neither
-        // a collision nor absence. Never silently consume wrong-page data.
-        if(!verifiedPage)return hold('TARGET_PAGE_IDENTITY_UNVERIFIED');
+      const page=await call('getGeneratorPageData',{generatorName:request.slug},{unauthenticated:true});
+      if(!sameSession())return hold('SESSION_CHANGED');
+      if(page.status==='too-many-requests')return hold('PROVIDER_RATE_LIMITED');
+      if(page.status==='success'){
+        const g=page.generator;
+        if(g?.name!==request.slug||typeof g.isPrivate!=='boolean'||
+           typeof g.publicId!=='string'||!safeId('public_'+g.publicId))
+          return hold('TARGET_PAGE_IDENTITY_UNVERIFIED');
+        // A valid existing page is occupied. Check for a contradictory
+        // authenticated ownership claim before treating it as foreign.
+        const owner=await call('checkGeneratorOwnership',{generatorName:request.slug});
+        if(!sameSession())return hold('SESSION_CHANGED');
+        if(owner.status==='is-owner')return hold('TARGET_CENSUS_OWNER_CONFLICT');
+        if(owner.status==='session-token-error')return hold('SESSION_REJECTED');
+        if(owner.status==='too-many-requests')return hold('PROVIDER_RATE_LIMITED');
         return proof('COLLISION');
       }
-      const absence=await confirmAbsent(request.slug,owner,page);
-      return absence.ok?proof('MISSING_VERIFIED'):absence;
+      if(page.status==='server-error')return hold('PROVIDER_UNAVAILABLE');
+      // A not-found page is useful evidence, but its status and an optional
+      // nonownership request do not prove global availability. An unavailable
+      // page read also cannot grant ownership. This candidate may attempt
+      // ONE journaled create, then ONE server-arbitrated rename.
+      return proof('CLAIM_CANDIDATE');
     }
     if(request.kind==='READ_CREATE') {
       const checked=await read(request.temporarySlug);
@@ -211,17 +218,11 @@ export async function perchanceSupplyIsolated(request) {
       // Exact first save is PRIVATE/EMPTY. Never use the current editor's
       // unsaved content, copy an existing owned generator, or create publicly.
       if(currentNames.has(request.slug))return hold('SLUG_ALREADY_OWNED');
-      // Ensure target is not already taken independently of this account.
-      const occupied=await call('getGeneratorPageData',{generatorName:request.slug},{unauthenticated:true});
-      if(occupied.status==='success')return hold('SLUG_COLLISION');
-      const targetOwner=await call('checkGeneratorOwnership',{generatorName:request.slug});
-      const absence=await confirmAbsent(request.slug,targetOwner,occupied);
-      if(!absence.ok)return absence;
       const template=await call('getGeneratorPageData',{generatorName:'minimal'},{unauthenticated:true});
       if(template.status!=='success'||template.generator?.name!=='minimal')
         return hold('TEMPLATE_UNVERIFIED');
-      const templateOwner=await call('checkGeneratorOwnership',{generatorName:'minimal'});
-      if(templateOwner.status!=='is-not-owner')return hold('TEMPLATE_OWNER_UNVERIFIED');
+      // Never use this account's own generator as a copy source.
+      if(currentNames.has('minimal'))return hold('TEMPLATE_OWNED_BY_TARGET');
       if(!sameSession())return hold('SESSION_CHANGED');
       const original=template.generator;
       // One provider request only, AFTER outer dispatcher journaling.
@@ -284,11 +285,8 @@ export async function perchanceSupplyIsolated(request) {
         return hold('SLUG_COLLISION');
       const checked=await read(request.temporarySlug);
       if(!checked.ok||checked.remoteId!==request.remoteId)return hold('TEMP_OWNER_UNVERIFIED');
-      const target=await call('getGeneratorPageData',{generatorName:request.slug},{unauthenticated:true});
-      if(target.status==='success')return hold('SLUG_COLLISION');
-      const targetOwner=await call('checkGeneratorOwnership',{generatorName:request.slug});
-      const absence=await confirmAbsent(request.slug,targetOwner,target);
-      if(!absence.ok)return absence;
+      // The provider's atomic rename is the final name-claim arbiter. The
+      // prepared journal already fences this write against replay.
       if(!sameSession())return hold('SESSION_CHANGED');
       const result=await call('changeGeneratorName',{
         currentName:request.temporarySlug,newName:request.slug});
