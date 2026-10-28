@@ -58,6 +58,22 @@ def stop(s,pid):
         if not status.exists() or 'State:\tZ' in status.read_text():return
         time.sleep(.05)
     raise AssertionError('owned Firefox parent still running')
+def sandbox_children(parent):
+    statuses={}
+    for path in pathlib.Path('/proc').glob('[0-9]*/status'):
+        try:statuses[int(path.parent.name)]=dict(line.split(':',1) for line in path.read_text().splitlines() if ':' in line)
+        except (FileNotFoundError,ProcessLookupError,PermissionError):pass
+    owned={parent}
+    for _ in range(8):
+        old=len(owned);owned.update(pid for pid,st in statuses.items() if int(st.get('PPid','-1')) in owned)
+        if len(owned)==old:break
+    out=[]
+    for pid in owned-{parent}:
+        st=statuses.get(pid,{})
+        name=st.get('Name','').strip()
+        if name.startswith(('Web Content','Isolated Web','WebExtensions')):
+            out.append({'pid':pid,'name':name,'seccomp':st.get('Seccomp','').strip(),'noNewPrivs':st.get('NoNewPrivs','').strip()})
+    return out
 def extension_url(s):
     return chrome(s,'return WebExtensionPolicy.getByID(arguments[0])?.extension.baseURI.spec;',[ID])+'ui.html'
 def mount(s):return asyncjs(s,'const done=arguments[arguments.length-1]; window.mountProofModule().then(()=>done(true),e=>done({error:String(e)}));')
@@ -94,6 +110,10 @@ def main():
             p1=t/'source-profile';downloads=t/'downloads';s,pid=start(firefox,p1,downloads)
             sandbox=chrome(s,"return {level:Services.prefs.getIntPref('security.sandbox.content.level'),version:Services.appinfo.version,build:Services.appinfo.appBuildID};")
             assert sandbox['level']>0
+            nav(s,'http://127.0.0.1:8765/site.html')
+            observedSandbox=sandbox_children(pid)
+            assert any(x['seccomp']=='2' and x['noNewPrivs']=='1' for x in observedSandbox),observedSandbox
+            record('S0','OS /proc confirms owned web content process has seccomp filter and no_new_privs; default sandbox configuration retained',processes=observedSandbox,**sandbox)
             assert call('POST',f'/session/{s}/moz/addon/install',{'path':str(xpi),'temporary':False})==ID
             url=extension_url(s);ui(s,url)
             p1pkg=json.loads((ROOT/'fixtures/module-v1.json').read_text());p2pkg=json.loads((ROOT/'fixtures/module-v2.json').read_text())
