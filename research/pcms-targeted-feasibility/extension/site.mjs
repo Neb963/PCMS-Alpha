@@ -18,7 +18,9 @@ export async function siteProof(op,data){
     for(;;){const entry=await existing.next();if(entry.done)break;await root.removeEntry(entry.value[0],{recursive:true});}
     for(const [path,b64] of Object.entries(data.opfs.files)){
       const names=path.split('/');let dir=root;for(const n of names.slice(0,-1))dir=await dir.getDirectoryHandle(n,{create:true});
-      const h=await dir.getFileHandle(names.at(-1),{create:true}),w=await h.createWritable();await w.write(Uint8Array.from(atob(b64),c=>c.charCodeAt(0)));await w.close();
+      const h=await dir.getFileHandle(names.at(-1),{create:true}),w=await h.createWritable();
+      // Pass a native Blob across the content-script wrapper, not a privileged JS buffer object.
+      await w.write(new Blob([Uint8Array.from(atob(b64),c=>c.charCodeAt(0))]));await w.close();
     }
     return {written:true};
   }
