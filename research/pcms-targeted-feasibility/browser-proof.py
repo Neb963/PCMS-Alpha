@@ -87,7 +87,9 @@ def click_module(s):
             time.sleep(.05)
         else:raise AssertionError('dynamic module UI button missing')
         key='element-6066-11e4-a52e-4f735466cecf'
-        label=call('GET',f'/session/{s}/element/{found[0][key]}/text')
+        # A read only DOM label oracle avoids getElementText before iframe layout.
+        # The real WebDriver click below still has to scroll and interact successfully.
+        label=sync(s,'return document.querySelector("button").textContent;')
         call('POST',f'/session/{s}/element/{found[0][key]}/click',{})
         return label
     finally:call('POST',f'/session/{s}/frame',{'id':None})
