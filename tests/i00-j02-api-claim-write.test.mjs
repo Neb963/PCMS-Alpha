@@ -19,7 +19,8 @@ const reply=(value,status=200)=>({status,headers:{get:()=> 'application/json'},
   json:async()=>value});
 
 async function fixture({kind,inventory=[],template=minimal,saveReply={status:'created',name:temp},
- renameReply={status:'success'},sessionChange=false}){
+ renameReply={status:'success'},sessionChange=false,
+ tempOwner='is-owner',tempPage=privateTemp}){
  const prior={location:globalThis.location,localStorage:globalThis.localStorage,fetch:globalThis.fetch};
  const calls=[];let sessionRaw=raw;
  globalThis.location={origin:'https://perchance.org'};
@@ -30,11 +31,11 @@ async function fixture({kind,inventory=[],template=minimal,saveReply={status:'cr
   if(endpoint==='getGeneratorsByUser')return reply({status:'success',generators:inventory});
   if(endpoint==='getGeneratorPageData'){
    if(body.generatorName==='minimal')return reply(template?{status:'success',generator:template}:{status:'not-found'});
-   if(body.generatorName===temp)return reply({status:'success',generator:privateTemp});
+   if(body.generatorName===temp)return reply({status:'success',generator:tempPage});
    return reply({status:'not-found'});
   }
   if(endpoint==='checkGeneratorOwnership')
-   return reply({status:body.generatorName===temp?'is-owner':'is-not-owner'});
+   return reply({status:body.generatorName===temp?tempOwner:'is-not-owner'});
   if(endpoint==='save'){
    if(sessionChange)sessionRaw=JSON.stringify({...user,changed:true});
    return reply(saveReply);
@@ -107,8 +108,20 @@ test('a rejected rename is never claimed successful or automatically replayed',a
  assert.equal(result.ok,false);assert.equal(result.code,'RENAME_ACK_UNCERTAIN');
  assert.equal(calls.filter(x=>x.endpoint==='changeGeneratorName').length,1);
 });
-test('RENAME refuses a temporary generator missing from the account census',async()=>{
+test('a verified temporary generator can be renamed before owned census catches up',async()=>{
  const {result,calls}=await fixture({kind:'RENAME',inventory:[]});
- assert.equal(result.code,'TEMP_CENSUS_OWNER_CONFLICT');
+ assert.equal(result.ok,true);
+ assert.equal(calls.filter(x=>x.endpoint==='changeGeneratorName').length,1);
+});
+test('RENAME rejects unverified temporary ownership before any name change',async()=>{
+ const {result,calls}=await fixture({kind:'RENAME',inventory:[{name:temp,isPrivate:true}],
+  tempOwner:'is-not-owner'});
+ assert.equal(result.code,'TEMP_OWNER_UNVERIFIED');
+ assert.equal(calls.filter(x=>x.endpoint==='changeGeneratorName').length,0);
+});
+test('RENAME refuses a temporary generator that is not private and empty',async()=>{
+ const {result,calls}=await fixture({kind:'RENAME',inventory:[{name:temp,isPrivate:true}],
+  tempPage:{...privateTemp,isPrivate:false}});
+ assert.equal(result.code,'TEMP_OWNER_UNVERIFIED');
  assert.equal(calls.filter(x=>x.endpoint==='changeGeneratorName').length,0);
 });
