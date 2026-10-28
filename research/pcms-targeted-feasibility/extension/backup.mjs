@@ -59,7 +59,11 @@ export async function handle(m,host){
     s.maintenance=true;host.event(s,'capture-barrier');await host.save(s);
     await browser.storage.local.set({captureStage:{phase:'capturing',complete:false}});
     for(const scope of f.localStorage)await site(scope,'freeze');
-    if(m.interrupt)throw Error('INJECTED_CAPTURE_INTERRUPTION; no archive published; barrier retained');
+    if(m.interrupt){
+      const partial=await site(f.localStorage[0],'read');
+      await browser.storage.local.set({captureStage:{phase:'capturing',complete:false,partialOrigin:partial}});
+      throw Error('INJECTED_CAPTURE_INTERRUPTION; no archive published; barrier retained');
+    }
     const sections=await collect(f),bytes=await makeArchive(sections,{captureId:crypto.randomUUID()});
     await validate(bytes);await browser.storage.local.set({captureStage:{phase:'validated',complete:true}});
     for(const scope of f.localStorage)await site(scope,'thaw');

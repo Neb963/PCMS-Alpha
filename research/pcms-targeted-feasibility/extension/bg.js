@@ -23,7 +23,7 @@ async function request(bound,method,args) {
       if(j.checkpoint>=30)j.status='Complete';
     }
   }
-  event(s,method,{version:bound.version});await save(s);return {accepted:true};
+  event(s,method,{version:bound.version});await save(s);if(method==='job')await schedule(s);return {accepted:true};
 }
 function runFrame(p,bound,context) {
   return new Promise((resolve,reject)=>{
