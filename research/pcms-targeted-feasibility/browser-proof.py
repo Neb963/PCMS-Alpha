@@ -86,7 +86,10 @@ def click_module(s):
             if found:break
             time.sleep(.05)
         else:raise AssertionError('dynamic module UI button missing')
-        key='element-6066-11e4-a52e-4f735466cecf';call('POST',f'/session/{s}/element/{found[0][key]}/click',{})
+        key='element-6066-11e4-a52e-4f735466cecf'
+        label=call('GET',f'/session/{s}/element/{found[0][key]}/text')
+        call('POST',f'/session/{s}/element/{found[0][key]}/click',{})
+        return label
     finally:call('POST',f'/session/{s}/frame',{'id':None})
 def main():
     for k in ['MOZ_DISABLE_CONTENT_SANDBOX','MOZ_DISABLE_GMP_SANDBOX','MOZ_DISABLE_RDD_SANDBOX','MOZ_DISABLE_SOCKET_PROCESS_SANDBOX']:
@@ -117,7 +120,7 @@ def main():
             assert call('POST',f'/session/{s}/moz/addon/install',{'path':str(xpi),'temporary':False})==ID
             url=extension_url(s);ui(s,url)
             p1pkg=json.loads((ROOT/'fixtures/module-v1.json').read_text());p2pkg=json.loads((ROOT/'fixtures/module-v2.json').read_text())
-            command(s,{'op':'install','package':p1pkg});mount(s);click_module(s)
+            command(s,{'op':'install','package':p1pkg});mount(s);assert click_module(s)=='Run v1 background job'
             initial=wait_state(s,lambda x:len(x['jobs'])==1);job=initial['jobs'][0]['id']
             nav(s,'about:blank');time.sleep(2)
             ui(s,url);one=wait_state(s,lambda x:len(x['effects'])>=1)
@@ -131,9 +134,13 @@ def main():
             record('A2','Firefox reports background stopped; new event page resumes same job',state=suspended)
             # Rebind lastOldBinding in current background before replacement.
             before=command(s,{'op':'state'});command(s,{'op':'install','package':p2pkg});mount(s)
+            assert click_module(s)=='Run v2 background job'
+            wait_state(s,lambda x:len(x['jobs'])==2)
             replay=command(s,{'op':'replayOld'});assert 'revoked generation' in replay['rejection'] and replay['before']==replay['after'],replay
             marker=len(command(s,{'op':'state'})['effects']);command(s,{'op':'wakeProof'});updated=wait_state(s,lambda x:len(x['effects'])>marker)
             assert all(e['version']=='2' for e in updated['effects'][marker:]);assert updated['jobs'][0]['id']==job
+            assert updated['jobs'][0]['input']==before['jobs'][0]['input']
+            assert updated['jobs'][0]['checkpoint']>=before['jobs'][0]['checkpoint']
             record('A3','unfinished job/input survives replacement; stale binding rejected; only v2 effects follow fence',replay=replay)
             originalPID=pid;count=len(updated['effects']);stop(s,pid);s=None
             s,pid=start(firefox,p1,downloads);assert pid!=originalPID;url=extension_url(s);ui(s,url)
