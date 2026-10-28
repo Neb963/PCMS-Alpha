@@ -107,10 +107,8 @@ test('a rejected rename is never claimed successful or automatically replayed',a
  assert.equal(result.ok,false);assert.equal(result.code,'RENAME_ACK_UNCERTAIN');
  assert.equal(calls.filter(x=>x.endpoint==='changeGeneratorName').length,1);
 });
-test('RENAME refuses a temporary generator whose remote source is not in the account census',async()=>{
+test('RENAME refuses a temporary generator missing from the account census',async()=>{
  const {result,calls}=await fixture({kind:'RENAME',inventory:[]});
- // The independent owner and private/empty checks remain the authoritative
- // source proof. A census mismatch must not authorize a name claim.
- assert.equal(result.ok,true);
- assert.equal(calls.filter(x=>x.endpoint==='changeGeneratorName').length,1);
+ assert.equal(result.code,'TEMP_CENSUS_OWNER_CONFLICT');
+ assert.equal(calls.filter(x=>x.endpoint==='changeGeneratorName').length,0);
 });
