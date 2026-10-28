@@ -74,7 +74,7 @@ def click_module(s):
     finally:call('POST',f'/session/{s}/frame',{'id':None})
 def main():
     for k in ['MOZ_DISABLE_CONTENT_SANDBOX','MOZ_DISABLE_GMP_SANDBOX','MOZ_DISABLE_RDD_SANDBOX','MOZ_DISABLE_SOCKET_PROCESS_SANDBOX']:
-        assert os.environ.get(k) not in ['1','true'],'weakened sandbox forbidden: '+k
+        assert not os.environ.get(k),'weakened sandbox forbidden: '+k
     firefox=pathlib.Path(os.environ['FIREFOX_BINARY']);gecko=pathlib.Path(os.environ['GECKODRIVER_BINARY'])
     with tempfile.TemporaryDirectory(prefix='pcms-targeted-') as tmp:
         t=pathlib.Path(tmp);xpi=t/'proof.xpi'

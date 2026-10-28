@@ -33,3 +33,4 @@ globalThis.pcmsSiteProof=async function(op,data){
   }
   throw Error('unknown synthetic site operation');
 };
+void 0; // executeScript files must return cloneable data, never the assigned function.

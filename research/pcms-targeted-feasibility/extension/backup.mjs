@@ -51,6 +51,7 @@ export async function handle(m,host){
     if(await get('sourceFixture'))throw Error('source already seeded; use fresh profile');
     const original=m.fixture,remap=await containers(original,'Source-');
     const f=restorePlan(original,remap);f.core=original.core;
+    if(s.module){f.modules.package=s.module.package;f.modules.enabled=s.module.enabled;}
     for(let i=0;i<f.personas.items.length;i++)await site(f.localStorage[i],'write',scopeData(f,i));
     await setCookies(f.cookies);await browser.storage.local.set({sourceFixture:f});return {seeded:true,mapping:remap};
   }
@@ -96,6 +97,7 @@ export async function handle(m,host){
     }
     await browser.storage.local.set({activeSnapshot:f,restoreStage:null,restoreReceipt:{mapping:stage.mapping,archiveSHA:stage.archiveSHA,byteRestore:'verified',login:'NOT TESTED',routes:'NOT TESTED'}});
     s=await host.read();s.maintenance=true;host.event(s,'restore-bytes-committed-awaiting-session-route-validation');await host.save(s);
+    s.jobs=f.core.jobs;s.module={package:f.modules.package,version:f.modules.package.version,epoch:1,enabled:f.modules.enabled,quiescing:false};await host.save(s);
     return {mapping:stage.mapping,status:'bytes restored; operational hold retained',jobs:f.core.jobs};
   }
   if(m.op==='verifyRestore'){
