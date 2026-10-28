@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
 import {perchanceSupplyIsolated} from '../src/runtime/perchance-supply.mjs';
+import {advanceS04Effect} from '../src/runtime/creation-effects.mjs';
 globalThis.crypto??=webcrypto;
 
 const user={loggedIn:true,email:'j02-write@example.invalid',sessionToken:'fixture-session-0123456789'};
@@ -124,4 +125,20 @@ test('RENAME refuses a temporary generator that is not private and empty',async(
   tempPage:{...privateTemp,isPrivate:false}});
  assert.equal(result.code,'TEMP_OWNER_UNVERIFIED');
  assert.equal(calls.filter(x=>x.endpoint==='changeGeneratorName').length,0);
+});
+
+test('new claim proof advances the existing durable creation state without global absence assertion',()=>{
+ const record={intentId:'j02_claim_intent',slug,state:'OWNER_READBACK_PENDING',revision:7};
+ const out=advanceS04Effect(record,'TARGET_OBSERVED',{
+  source:'INDEPENDENT_TARGET_READBACK',slug,state:'CLAIM_CANDIDATE'});
+ assert.equal(out.ok,true);assert.equal(out.record.state,'OWNER_MISSING_VERIFIED');
+ assert.equal(out.record.revision,8);
+ assert.equal(record.state,'OWNER_READBACK_PENDING');
+});
+test('an observed occupied slug does not advance to CREATE',()=>{
+ const record={intentId:'j02_claim_intent',slug,state:'OWNER_READBACK_PENDING',revision:7};
+ const out=advanceS04Effect(record,'TARGET_OBSERVED',{
+  source:'INDEPENDENT_TARGET_READBACK',slug,state:'COLLISION'});
+ assert.equal(out.record.state,'TARGET_COLLISION_HELD');
+ assert.equal(out.record.hold,'REMOTE_COLLISION');
 });
