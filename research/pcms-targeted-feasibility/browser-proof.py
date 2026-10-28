@@ -134,7 +134,8 @@ def main():
             record('A2','Firefox reports background stopped; new event page resumes same job',state=suspended)
             # Rebind lastOldBinding in current background before replacement.
             before=command(s,{'op':'state'});command(s,{'op':'install','package':p2pkg});mount(s)
-            assert click_module(s)=='Run v2 background job'
+            replacementLabel=click_module(s)
+            assert ' '.join(replacementLabel.split())=='Run v2 background job',('replacement UI label',replacementLabel)
             wait_state(s,lambda x:len(x['jobs'])==2)
             replay=command(s,{'op':'replayOld'});assert 'revoked generation' in replay['rejection'] and replay['before']==replay['after'],replay
             marker=len(command(s,{'op':'state'})['effects']);command(s,{'op':'wakeProof'});updated=wait_state(s,lambda x:len(x['effects'])>marker)
