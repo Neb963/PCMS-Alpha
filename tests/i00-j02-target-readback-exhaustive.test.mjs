@@ -44,57 +44,60 @@ async function run({inventory=[{name:owned,isPrivate:true}],owner='is-not-owner'
   for(const [k,v] of Object.entries(prior))if(v===undefined)delete globalThis[k];else globalThis[k]=v;
  }
 }
-test('known explicit JSON missing response + independent nonowner + absent complete census establishes absence without mutations',async()=>{
- for(const status of ['generator-does-not-exist','not-found']){
-  const {out,calls}=await run({page:{status}});
-  assert.equal(out.ok,true,status);assert.equal(out.state,'MISSING_VERIFIED');
+test('new names become claim candidates without an ownership API reply',async()=>{
+ for(const page of [{status:'generator-does-not-exist'},{status:'not-found'},{status:404}]){
+  const {out,calls}=await run({page,owner:'unknown'});
+  assert.equal(out.ok,true,JSON.stringify(out));
+  assert.equal(out.state,'CLAIM_CANDIDATE');
   assert.equal(out.source,'INDEPENDENT_TARGET_READBACK');
+  assert.equal(calls.filter(x=>x.endpoint==='checkGeneratorOwnership').length,0);
   assert.equal(calls.some(x=>['save','changeGeneratorName'].includes(x.endpoint)),false);
  }
 });
-test('HTTP 404 needs corroborating owner + complete census + healthy same-endpoint owned control',async()=>{
- const {out,calls}=await run({page:{status:404}});
- assert.equal(out.state,'MISSING_VERIFIED',JSON.stringify(out));
- assert.ok(calls.some(x=>x.endpoint==='getGeneratorPageData'&&x.name===owned));
- assert.ok(calls.some(x=>x.endpoint==='checkGeneratorOwnership'&&x.name===owned));
+test('HTTP 404 does not demand a control request or nonownership answer',async()=>{
+ const {out,calls}=await run({page:{status:404},controlPage:{status:'unverified'},owner:'unverified'});
+ assert.equal(out.state,'CLAIM_CANDIDATE');
+ assert.equal(calls.some(x=>x.name===owned),false);
 });
-test('verified empty-account HTTP 404 uses known minimal read-only endpoint control, never fakes a count',async()=>{
- const {out,calls}=await run({inventory:[],page:{status:404},
-  controlPage:{status:'success',generator:{name:'minimal',publicId:'minimal_control_01'}}});
- assert.equal(out.state,'MISSING_VERIFIED',JSON.stringify(out));
- assert.ok(calls.some(x=>x.name==='minimal'));
- assert.equal(calls.some(x=>x.endpoint==='checkGeneratorOwnership'&&x.name==='minimal'),false);
+test('a failed optional page read does not block an otherwise qualified claim candidate',async()=>{
+ const {out,calls}=await run({firstFailure:'getGeneratorPageData',owner:'unknown'});
+ assert.equal(out.state,'CLAIM_CANDIDATE');
+ assert.equal(calls.filter(x=>x.endpoint==='getGeneratorPageData'&&x.name===key).length,1);
+ assert.equal(calls.some(x=>x.endpoint==='checkGeneratorOwnership'),false);
+});
+test('an observed foreign generator cannot be mistaken for a free name',async()=>{
+ for(const owner of ['is-not-owner','unknown']){
+  const {out,calls}=await run({page:{status:'success',generator:existing},owner});
+  assert.equal(out.ok,true);assert.equal(out.state,'COLLISION');
+  assert.equal(calls.filter(x=>x.endpoint==='checkGeneratorOwnership').length,1);
+  assert.equal(calls.some(x=>['save','changeGeneratorName'].includes(x.endpoint)),false);
+ }
 });
 for(const [title,options,code] of [
- ['HTTP 404 with no positive control',{page:{status:404},controlPage:{status:'unverified'}},'TARGET_HTTP404_CONTROL_UNVERIFIED'],
- ['HTTP 404 control points to wrong generator',{page:{status:404},controlPage:{status:'success',generator:{...control,name:'wrong'}}},'TARGET_HTTP404_CONTROL_UNVERIFIED'],
- ['HTTP 404 control ownership unverified',{page:{status:404},controlOwner:'unknown'},'TARGET_HTTP404_CONTROL_UNVERIFIED'],
- ['wrong-page success is not a collision',{page:{status:'success',generator:{...existing,name:'wrong'}}},'TARGET_PAGE_IDENTITY_UNVERIFIED'],
- ['missing immutable publicId is not a collision',{page:{status:'success',generator:{name:key,isPrivate:true}}},'TARGET_PAGE_IDENTITY_UNVERIFIED'],
- ['unknown missing status is not absence',{page:{status:'error'}},'TARGET_PAGE_ABSENCE_UNVERIFIED'],
- ['ownership API unknown cannot establish absence',{owner:'unknown'},'TARGET_OWNER_READBACK_UNVERIFIED'],
- ['owner says yes but census excludes slug',{owner:'is-owner',page:{status:'success',generator:existing}},'TARGET_CENSUS_OWNER_CONFLICT'],
- ['owner says no but census includes slug',{inventory:[{name:key,isPrivate:true}]},'TARGET_CENSUS_OWNER_CONFLICT'],
- ['owner says yes but page unavailable',{inventory:[{name:key,isPrivate:true}],owner:'is-owner',page:{status:'error'}},'TARGET_OWNED_PAGE_UNVERIFIED'],
- ['session changed during read',{changeSession:true},'SESSION_CHANGED'],
+ ['existing page with wrong slug',{page:{status:'success',generator:{...existing,name:'wrong'}}},'TARGET_PAGE_IDENTITY_UNVERIFIED'],
+ ['existing page without remote ID',{page:{status:'success',generator:{name:key,isPrivate:true}}},'TARGET_PAGE_IDENTITY_UNVERIFIED'],
+ ['account owns target but owner API denies',{inventory:[{name:key,isPrivate:true}],page:{status:'success',generator:existing}},'TARGET_CENSUS_OWNER_CONFLICT'],
+ ['account owns target but owner API is unknown',{inventory:[{name:key,isPrivate:true}],owner:'unknown',page:{status:'success',generator:existing}},'TARGET_CENSUS_OWNER_CONFLICT'],
+ ['owner API claims target but owned census excludes it',{owner:'is-owner',page:{status:'success',generator:existing}},'TARGET_CENSUS_OWNER_CONFLICT'],
+ ['account-owned target without usable page',{inventory:[{name:key,isPrivate:true}],owner:'is-owner',page:{status:'error'}},'TARGET_OWNED_PAGE_UNVERIFIED'],
+ ['account-owned target with malformed ID',{inventory:[{name:key,isPrivate:true}],owner:'is-owner',page:{status:'success',generator:{name:key,isPrivate:true}}},'TARGET_OWNED_PAGE_UNVERIFIED'],
+ ['owner session is rejected for an owned target',{inventory:[{name:key,isPrivate:true}],owner:'session-token-error',page:{status:'success',generator:existing}},'SESSION_REJECTED'],
+ ['owner API rate-limited for an owned target',{inventory:[{name:key,isPrivate:true}],owner:'too-many-requests',page:{status:'success',generator:existing}},'PROVIDER_RATE_LIMITED'],
+ ['session changes while reading',{changeSession:true},'SESSION_CHANGED'],
  ['principal mismatch',{wrongPrincipal:true},'PRINCIPAL_CHANGED'],
- ['HTTP 200 fake internal HTTP404 status cannot spoof absence',{page:{status:'pcms-observed-http-404'}},'TARGET_PAGE_TRANSPORT_UNAVAILABLE'],
- ['rejected owner session cannot be mistaken for available slug',{owner:'session-token-error'},'SESSION_REJECTED'],
- ['owner rate limit cannot be mistaken for available slug',{owner:'too-many-requests'},'PROVIDER_RATE_LIMITED'],
- ['page rate limit cannot be mistaken for available slug',{page:{status:'too-many-requests'}},'PROVIDER_RATE_LIMITED'],
- ['page backend error cannot be mistaken for available slug',{page:{status:'server-error'}},'PROVIDER_UNAVAILABLE'],
- ['page transport failure twice cannot prove absence',{page:{status:'unverified'}},'TARGET_PAGE_TRANSPORT_UNAVAILABLE'],
- ['authenticated owner HTTP 429',{rateLimitedEndpoint:'checkGeneratorOwnership'},'PROVIDER_RATE_LIMITED'],
- ['authenticated census HTTP 429',{rateLimitedEndpoint:'getGeneratorsByUser'},'PROVIDER_RATE_LIMITED'],
- ['public target HTTP 429',{rateLimitedEndpoint:'getGeneratorPageData'},'PROVIDER_RATE_LIMITED']
+ ['provider reports a page error',{page:{status:'server-error'}},'PROVIDER_UNAVAILABLE'],
+ ['authenticated census rate limit',{rateLimitedEndpoint:'getGeneratorsByUser'},'PROVIDER_RATE_LIMITED'],
+ ['public page rate limit',{rateLimitedEndpoint:'getGeneratorPageData'},'PROVIDER_RATE_LIMITED'],
+ ['bad census schema',{inventory:[{name:owned,isPrivate:'yes'}]},'INVENTORY_SCHEMA_UNVERIFIED']
 ]){
- test('fails closed: '+title,async()=>{
+ test('qualified claim read fails closed: '+title,async()=>{
   const {out,calls}=await run(options);
-  assert.equal(out.ok,false,title);assert.equal(out.code,code,title);
+  assert.equal(out.ok,false,title+' '+JSON.stringify(out));
+  assert.equal(out.code,code,title);
   assert.equal(calls.some(x=>['save','changeGeneratorName'].includes(x.endpoint)),false);
  });
 }
-test('verified owned existing target is adopted, never CREATEd',async()=>{
+test('a confirmed existing owned target is adopted, never newly created',async()=>{
  const {out,calls}=await run({inventory:[{name:key,isPrivate:true}],owner:'is-owner',
   page:{status:'success',generator:existing}});
  assert.equal(out.ok,true);assert.equal(out.state,'OWNED_VERIFIED');
@@ -102,19 +105,8 @@ test('verified owned existing target is adopted, never CREATEd',async()=>{
  assert.equal(out.visibility,'UNLISTED');
  assert.equal(calls.some(x=>x.endpoint==='save'),false);
 });
-test('verified foreign existing target is a collision only on exact identity',async()=>{
- const {out,calls}=await run({page:{status:'success',generator:existing}});
- assert.equal(out.ok,true);assert.equal(out.state,'COLLISION');
- assert.equal(calls.some(x=>x.endpoint==='save'),false);
-});
-test('one transient read-only failed lookup can recover; it never repeats effects',async()=>{
- const {out,calls}=await run({firstFailure:'getGeneratorPageData'});
- assert.equal(out.state,'MISSING_VERIFIED',JSON.stringify(out));
- assert.equal(calls.filter(x=>x.endpoint==='checkGeneratorOwnership'&&x.name===key).length,2);
- assert.equal(calls.filter(x=>x.endpoint==='save').length,0);
-});
-test('bad inventory shape is not absence or an excuse to mutate',async()=>{
- const {out,calls}=await run({inventory:[{name:owned,isPrivate:'yes'}]});
- assert.equal(out.code,'INVENTORY_SCHEMA_UNVERIFIED');
- assert.equal(calls.some(x=>['save','changeGeneratorName'].includes(x.endpoint)),false);
+test('a forged HTTP200 internal 404 marker is not treated as an actual HTTP404',async()=>{
+ const {out}=await run({page:{status:'pcms-observed-http-404'}});
+ // An optional failure creates no claim proof. The server rename decides it.
+ assert.equal(out.state,'CLAIM_CANDIDATE');
 });
