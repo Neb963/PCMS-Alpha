@@ -70,5 +70,27 @@ export async function validate(b) {
     seen.add(f.category);sections[f.category]=JSON.parse(dec.decode(data));
   }
   if(seen.size!==REQUIRED.length||z.size!==m.files.length+2)throw Error('missing/unlisted content');
+  validatePayload(sections);
   return {manifest:m,sections};
+}
+function validatePayload(s){
+  const check=(ok,name)=>{if(!ok)throw Error('missing/incompatible payload: '+name);};
+  const obj=x=>x&&typeof x==='object'&&!Array.isArray(x);
+  for(const k of ['records','queue','jobs','exportReceipts'])check(Array.isArray(s.core?.[k]),'core.'+k);
+  check(obj(s.core.config)&&obj(s.core.schedule),'config/schedules');
+  check(s.core.jobs.every(j=>typeof j.id==='string'&&typeof j.status==='string'&&Number.isInteger(j.jobABI)&&['none','sent'].includes(j.effect)),'jobs');
+  const p=s.modules?.package;
+  check(p?.id==='synthetic-module'&&p.coreABI===1&&p.jobABI===1&&typeof p.background==='string'&&typeof p.ui==='string'&&typeof p.version==='string','module ABI/files');
+  check(obj(s.modules.settings)&&typeof s.modules.enabled==='boolean','module settings/status');
+  check(obj(s.sources)&&Object.keys(s.sources).length&&Array.isArray(s.history)&&Array.isArray(s.journal),'source/history/Journal');
+  check(typeof s.credentials?.githubToken==='string'&&typeof s.credentials?.otherSecret==='string','credentials');
+  check(Array.isArray(s.personas?.items)&&s.personas.items.length>0&&Array.isArray(s.personas.routes)&&obj(s.personas.mappings),'Personas/routes');
+  const stores=new Set(s.personas.items.map(x=>x.cookieStoreId));check(stores.size===s.personas.items.length&&[...stores].every(x=>typeof x==='string'),'container identity');
+  check(Array.isArray(s.cookies)&&s.cookies.every(c=>stores.has(c.storeId)&&typeof c.name==='string'&&typeof c.value==='string'&&typeof c.domain==='string'&&typeof c.path==='string'&&typeof c.session==='boolean'),'cookies');
+  for(const k of ['localStorage','indexedDB','opfs'])check(Array.isArray(s[k])&&s[k].length===stores.size&&new Set(s[k].map(x=>x.storeId)).size===stores.size&&s[k].every(x=>stores.has(x.storeId)&&x.origin==='http://127.0.0.1:8765'),'origin scopes '+k);
+  check(s.localStorage.every(x=>obj(x.values)),'localStorage contents');
+  check(s.indexedDB.every(x=>Array.isArray(x.databases)&&x.databases.every(d=>Array.isArray(d.stores)&&d.stores.every(t=>Array.isArray(t.records)))),'IndexedDB contents');
+  check(s.opfs.every(x=>obj(x.files)),'OPFS contents');
+  check(Array.isArray(s.ai?.chatIds)&&Array.isArray(s.ai.attachments)&&typeof s.ai.draft==='string','AI references/draft');
+  check(obj(s.native?.files)&&Object.hasOwn(s.native.files,'configs/entry-a.conf')&&Array.isArray(s.native.prerequisites),'native bundle/prerequisites');
 }

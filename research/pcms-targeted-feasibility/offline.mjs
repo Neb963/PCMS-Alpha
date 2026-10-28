@@ -20,6 +20,9 @@ await assert.rejects(validate(await makeArchive(f,{complete:false,missing:['nati
 const entries=unzip(bytes);entries.delete('data/opfs.json');await assert.rejects(validate(zip([...entries])));
 const incompatible=unzip(bytes),m=JSON.parse(new TextDecoder().decode(incompatible.get('manifest.json')));m.version=99;const mb=jsonBytes(m);incompatible.set('manifest.json',mb);incompatible.set('manifest.sha256',enc.encode(await hash(mb)));await assert.rejects(validate(zip([...incompatible])));
 results.push({id:'D4',status:'PASS',tier:'SYNTHETIC',oracle:'corrupted, truncated, incomplete, missing and incompatible archives rejected'});
+const absent=structuredClone(f);delete absent.credentials.githubToken;await assert.rejects(validate(await makeArchive(absent)),/payload/);
+const wrongABI=structuredClone(f);wrongABI.modules.package.coreABI=99;await assert.rejects(validate(await makeArchive(wrongABI)),/ABI/);
+results.push({id:'D7',status:'PASS',tier:'SYNTHETIC',oracle:'valid hashes do not conceal absent credential field or incompatible module ABI'});
 const state={module:{version:'2',epoch:2,enabled:true},paused:false,maintenance:false};admit(state,{version:'2',epoch:2},'effect');assert.throws(()=>admit(state,{version:'1',epoch:1},'effect'),/revoked/);state.module.enabled=false;assert.throws(()=>admit(state,{version:'2',epoch:2},'job'),/revoked/);
 results.push({id:'D5',status:'PASS',tier:'SYNTHETIC',oracle:'generation fence rejects stale and disabled requests; not browser lifecycle proof'});
 // Actual torn archive bytes must fail before any restore. Storage crash recovery is browser-only.
