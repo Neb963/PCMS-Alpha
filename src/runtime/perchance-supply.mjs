@@ -283,6 +283,9 @@ export async function perchanceSupplyIsolated(request) {
     if(request.kind==='RENAME'){
       if(request.temporarySlug===request.slug||currentNames.has(request.slug))
         return hold('SLUG_COLLISION');
+      // A temporary generator must still be present in the selected
+      // account's fresh owned-generator census before it can be renamed.
+      if(!currentNames.has(request.temporarySlug))return hold('TEMP_CENSUS_OWNER_CONFLICT');
       const checked=await read(request.temporarySlug);
       if(!checked.ok||checked.remoteId!==request.remoteId)return hold('TEMP_OWNER_UNVERIFIED');
       // The provider's atomic rename is the final name-claim arbiter. The
