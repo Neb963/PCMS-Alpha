@@ -3,7 +3,7 @@ import {ensureCreationInventory,recoverMissingCreationCensus} from './creation-i
 import {inventoryBoundary} from './inventory-boundary.mjs';
 // S04 fixed, one-step guarded creation runner. No generic job engine.
 // Canonical operator intent scopes private creation independently of Git;
-// current account/route/owner and intent journal proofs remain mandatory.
+// current account/route, authenticated inventory, and intent journal proofs remain mandatory.
 import {openCanonicalDatabase,createRestoreSentinel,fail} from './journal.mjs';
 import {createCoordinatorStore} from './coordinator-store.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
@@ -135,11 +135,11 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         const inventory=await ensureCreationInventory({db:await (dbPromise||=open()),
           account,syncInventory,now});
         if(!inventory.ok)return inventory;
-        // A prior readback is historical; recheck target immediately before
+        // A prior census/readback is historical; recheck account and name immediately before
         // starting a possible remote CREATE.
         const target=await read('READ_TARGET');
         if(!target.ok)return target; // Preserve actual bridge, identity or provider-read failure.
-        if(target.state!=='MISSING_VERIFIED')return fail('TARGET_STATE_CHANGED');
+        if(!['CLAIM_CANDIDATE','MISSING_VERIFIED'].includes(target.state))return fail('TARGET_STATE_CHANGED');
         const operationId='s04_create_'+crypto.randomUUID().replaceAll('-','');
         const fp=await fingerprint({intentId:item.intentId,accountId:item.accountId,
           accountRevision:item.accountRevision,bindingVersion:item.bindingVersion,
@@ -150,7 +150,7 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         if(!mutable)return fail('PROVIDER_ACTIVATION_HELD');
         const target=await read('READ_TARGET');
         if(!target.ok)return target; // Preserve actual bridge, identity or provider-read failure.
-        if(target.state!=='MISSING_VERIFIED')return fail('TARGET_STATE_CHANGED');
+        if(!['CLAIM_CANDIDATE','MISSING_VERIFIED'].includes(target.state))return fail('TARGET_STATE_CHANGED');
         const operationId='s04_rename_'+crypto.randomUUID().replaceAll('-','');
         const fp=await fingerprint({intentId:item.intentId,accountId:item.accountId,
           accountRevision:item.accountRevision,remoteId:item.remoteId,
@@ -167,7 +167,7 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         // Prepared-only evidence may predate Archive or a human-created slug.
         // Re-observe immediately before dispatch; uncertainty is never replayed.
         const target=await read('READ_TARGET');
-        if(!target.ok||target.source!=='INDEPENDENT_TARGET_READBACK'||target.slug!==item.slug||target.state!=='MISSING_VERIFIED')
+        if(!target.ok||target.source!=='INDEPENDENT_TARGET_READBACK'||target.slug!==item.slug||!['CLAIM_CANDIDATE','MISSING_VERIFIED'].includes(target.state))
           return fail(target.code||'TARGET_STATE_CHANGED');
         if(item.state==='RENAME_PREPARED'){
           const temporary=await read('READ_CREATE',{temporarySlug:item.temporarySlug,remoteId:item.remoteId});
